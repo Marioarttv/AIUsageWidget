@@ -1,0 +1,89 @@
+AI Usage Widget
+==============
+
+Start
+-----
+Double-click AIUsageWidget.exe or START-WIDGET.cmd.
+The app uses the .NET 10 Windows Desktop runtime already installed on this PC.
+Keep the executable and its accompanying files in this folder.
+Launching it again brings the existing widget into an always-on-top view.
+If you cannot find it, double-click SHOW-WIDGET.cmd. This brings it forward
+and recenters it on the primary monitor. A taskbar entry is available when
+the widget is in always-on-top mode. New installations start in this mode.
+
+Controls
+--------
+Drag the title area to move the widget. Its position is saved.
+The arrow switches between desktop mode and always-on-top mode.
+The refresh button refreshes Codex; automatic refresh runs every 90 seconds.
+Hover over a reset countdown to see the exact local reset date and time.
+The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
+Start with Windows can be enabled in either menu; it is initially off.
+Double-click the tray icon to show the widget above other windows.
+
+Reading the bars
+----------------
+Bars and percentages show REMAINING subscription allowance.
+Codex windows are labelled by the duration returned by the account, rather
+than assuming every plan has the same limits. Multiple buckets are supported.
+Missing readings show a dash. After a reset passes, the old percentage is
+hidden until a new reading arrives. The app never assumes a fresh allowance.
+
+Claude
+------
+The usage feed is connected to your Claude Code status line.
+Readings become available after a Claude Code response and update when
+Claude Code supplies new data. If necessary, restart your existing Claude
+Code session for it to load the new status-line command.
+Activity elsewhere in Claude may not appear until the next Claude Code
+response. The displayed timestamp identifies the last Claude Code reading.
+The widget does not send Claude messages or consume model tokens.
+The original status-line command is saved and invoked by the wrapper; if
+that command fails, a simple model/context status line is shown instead.
+All unrelated Claude settings are preserved.
+
+If this folder is moved, run CONNECT-CLAUDE.cmd from its new location.
+To restore the previous Claude status line, run DISCONNECT-CLAUDE.cmd.
+These scripts use the Node.js installation already present on this PC.
+
+Local storage
+-------------
+Usage snapshots, position, a short diagnostic log, and the original Claude
+status-line configuration are stored in:
+  %LOCALAPPDATA%\AIUsageWidget
+A complete backup of Claude settings from before setup is stored there too.
+The widget stores quota readings, not conversation content or credentials.
+Codex authenticates through your existing Codex CLI login. If it is signed
+out, sign in through Codex CLI and refresh the widget.
+
+Desktop mode
+------------
+The widget is attached to Windows' desktop host, so normal app windows cover
+it and it appears when you view the desktop. Your wallpaper is not modified.
+If Windows cannot expose its desktop host, the app uses a window behind other
+windows instead. The status label reports that fallback.
+After restarting Windows Explorer, reopen the widget if needed.
+
+Remove
+------
+Turn off Start with Windows in the menu, choose Quit, and run
+DISCONNECT-CLAUDE.cmd. You can then remove this folder. Local usage data and
+configuration backups can be removed separately if no longer wanted.
+
+Source and validation
+---------------------
+The source archive is provided beside this app folder.
+Build: dotnet build UsageWidget/UsageWidget.csproj -c Release
+Publish: dotnet publish UsageWidget/UsageWidget.csproj -c Release -o app
+Tests: node --test tests/bridge.test.cjs tests/setup.test.cjs
+       dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
+
+Validated: live Codex account refresh; window-duration labels; multiple
+quota buckets; zero and missing usage; expired resets; atomic Claude cache
+writes; repeatable setup and restoration; preservation of other Claude
+settings; visible layout; settings menu; desktop and always-on-top modes.
+
+Documented data interfaces
+--------------------------
+https://learn.chatgpt.com/docs/app-server
+https://code.claude.com/docs/en/statusline
