@@ -9,8 +9,18 @@
     <AssemblyName>AIUsageWidget</AssemblyName>
     <RootNamespace>UsageWidget</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.2</Version>
+    <ApplicationIcon>../../assets/widget.ico</ApplicationIcon>
+    <Version>1.0.3</Version>
     <!-- WPF owns DPI initialization; Windows Forms is used only for the tray icon. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="../../assets/widget.ico" Link="Assets/widget.ico" />
+    <Content Include="../../scripts/claude-bridge.cjs" Link="claude-bridge.cjs" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../scripts/setup-claude.cjs" Link="setup-claude.cjs" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../scripts/CONNECT-CLAUDE.cmd" Link="CONNECT-CLAUDE.cmd" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../scripts/DISCONNECT-CLAUDE.cmd" Link="DISCONNECT-CLAUDE.cmd" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../scripts/SHOW-WIDGET.cmd" Link="SHOW-WIDGET.cmd" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/USER-GUIDE.txt" Link="USER-GUIDE.txt" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

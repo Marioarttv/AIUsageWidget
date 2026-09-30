@@ -20,7 +20,6 @@ public static class NativeDesktop
     [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr window, ref POINT point);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
-    [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr icon);
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).Handle;
 
     public static void CenterOnPrimary(Window window) {

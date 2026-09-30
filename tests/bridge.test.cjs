@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { normalize, writeSnapshot } = require('../claude-bridge.cjs');
+const { normalize, writeSnapshot } = require('../scripts/claude-bridge.cjs');
 const now = new Date('2026-09-30T12:00:00Z');
 const reset = Math.floor(now.getTime() / 1000) + 7200;
 

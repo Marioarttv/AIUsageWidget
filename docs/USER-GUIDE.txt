@@ -72,9 +72,10 @@ configuration backups can be removed separately if no longer wanted.
 
 Source and validation
 ---------------------
-The source archive is provided beside this app folder.
-Build: dotnet build UsageWidget/UsageWidget.csproj -c Release
-Publish: dotnet publish UsageWidget/UsageWidget.csproj -c Release -o app
+The source is in the repository's src/UsageWidget folder.
+Run the following from the repository root:
+Build: dotnet build src/UsageWidget/UsageWidget.csproj -c Release
+Publish: dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -o app
 Tests: node --test tests/bridge.test.cjs tests/setup.test.cjs
        dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
 
