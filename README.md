@@ -21,7 +21,7 @@ Claude readings work as soon as Claude Code is signed in. Optionally, run `app/C
 
 - Drag the title to reposition the widget.
 - Use the pin to switch between **Always on top** and **On desktop**. On desktop keeps the widget below every other window, even when clicked, while keeping its taskbar button.
-- Click **↻** to refresh both services. Codex refreshes every 90 seconds and Claude every 3 minutes.
+- Click **↻** to refresh both services. Both refresh automatically every 3 minutes.
 - Hover over a countdown or limit row for the exact local reset date and time.
 - Open **⋯** for **Start with Windows**, **Low 5-hour limit alerts**, **Hide**, and **Quit**.
 - When a 5-hour limit drops below 10% remaining, a Windows notification appears once for that window. Click it to bring the widget forward. Alerts are on by default.

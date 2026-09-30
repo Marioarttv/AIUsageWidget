@@ -11,8 +11,8 @@
       <Setter Property="Padding" Value="11,8"/>
       <Setter Property="FontFamily" Value="Segoe UI"/>
       <Setter Property="FontSize" Value="12"/>
-      <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" Foreground="#F0F3F7" FontSize="12" TextWrapping="Wrap" MaxWidth="340"/></DataTemplate></Setter.Value></Setter>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/></Border></ControlTemplate></Setter.Value></Setter>
+      <!-- No data binding here: a {Binding} would load WPF's XML support (several MB) just to show tooltips. -->
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}" MaxWidth="362"><ContentPresenter><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="#D4DCE7"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,5"/><Setter Property="Cursor" Value="Hand"/>

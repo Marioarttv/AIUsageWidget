@@ -22,7 +22,9 @@ public static class DataStore
     public static void EnsureDirectory() => Directory.CreateDirectory(DirectoryPath);
     public static T? Read<T>(string name)
     {
-        try { return JsonSerializer.Deserialize<T>(File.ReadAllText(Path.Combine(DirectoryPath, name)), JsonOptions); }
+        string path = Path.Combine(DirectoryPath, name);
+        if (!File.Exists(path)) return default;
+        try { return JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOptions); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return default; }
     }
     public static UsageSnapshot? ReadSnapshot(string name) => Read<UsageSnapshot>(name);

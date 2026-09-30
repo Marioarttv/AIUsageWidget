@@ -22,7 +22,7 @@ public sealed class ClaudeService
     {
         var now = DateTimeOffset.UtcNow;
         // The usage endpoint is rate limited; poll gently and honour server back-off even for manual refreshes.
-        if (now < backoffUntil || now - lastAttempt < (manual ? TimeSpan.FromSeconds(30) : TimeSpan.FromMinutes(3))) return;
+        if (now < backoffUntil || now - lastAttempt < (manual ? TimeSpan.FromSeconds(30) : TimeSpan.FromMinutes(2.5))) return;
         if (!await refreshLock.WaitAsync(0)) return;
         Refreshing = true;
         try
