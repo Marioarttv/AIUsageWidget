@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -13,14 +14,15 @@ namespace UsageWidget;
 public partial class MainWindow : Window
 {
     private readonly CodexService codex = new();
+    private readonly ClaudeService claude = new();
     private readonly WidgetSettings settings = DataStore.Read<WidgetSettings>("settings.json") ?? new();
     private readonly DispatcherTimer displayTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(90) };
     private readonly Forms.NotifyIcon tray;
-    private DateTimeOffset lastManualRefresh = DateTimeOffset.MinValue;
+    private Forms.ToolStripMenuItem? trayStartup, trayAlerts;
+    private DateTimeOffset lastRefresh = DateTimeOffset.MinValue;
     private NativeDesktop.POINT? dragOrigin;
     private NativeDesktop.RECT dragRect;
-    private bool desktopAttached;
     private bool quitting;
 
     public MainWindow()
@@ -28,20 +30,23 @@ public partial class MainWindow : Window
         InitializeComponent();
         bool reveal = Environment.GetCommandLineArgs().Contains("--show");
         if (reveal) { settings.Mode = "topmost"; settings.X = null; settings.Y = null; }
+        else if (settings.Mode != "topmost") settings.Mode = "desktop";
         Left = SystemParameters.WorkArea.Right - Width - 28;
         Top = SystemParameters.WorkArea.Top + 60;
         tray = new Forms.NotifyIcon { Icon = MakeIcon(), Text = "AI Usage Widget", Visible = true };
         tray.ContextMenuStrip = BuildTrayMenu();
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); });
+        tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); Activate(); });
         Loaded += async (_, _) => {
             DataStore.Log("Widget loaded: mode=" + settings.Mode);
+            NativeDesktop.KeepAtBottom(this, () => settings.Mode == "desktop");
             ApplyMode();
             Render();
             if (reveal) _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => { NativeDesktop.CenterOnPrimary(this); SavePosition(); Activate(); }));
             displayTimer.Tick += (_, _) => { ProcessRequest(); Render(); };
-            refreshTimer.Tick += async (_, _) => await Refresh();
+            refreshTimer.Tick += async (_, _) => await Refresh(false);
             displayTimer.Start(); refreshTimer.Start();
-            await Refresh();
+            await Refresh(false);
         };
         Closing += (_, e) => {
             if (!quitting) { e.Cancel = true; Hide(); }
@@ -59,12 +64,15 @@ public partial class MainWindow : Window
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Show widget", null, (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); Activate(); }));
-        menu.Items.Add("On desktop", null, (_, _) => Dispatcher.Invoke(() => SetMode("desktop")));
         menu.Items.Add("Always on top", null, (_, _) => Dispatcher.Invoke(() => SetMode("topmost")));
-        menu.Items.Add("Refresh Codex", null, async (_, _) => await Dispatcher.InvokeAsync(async () => await Refresh()));
-        var login = new Forms.ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = StartupEnabled() };
-        login.CheckedChanged += (_, _) => Dispatcher.Invoke(() => SetStartup(login.Checked));
-        menu.Items.Add(login);
+        menu.Items.Add("On desktop (below other windows)", null, (_, _) => Dispatcher.Invoke(() => SetMode("desktop")));
+        menu.Items.Add("Refresh now", null, (_, _) => Dispatcher.InvokeAsync(() => Refresh(true)));
+        trayStartup = new Forms.ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = StartupEnabled() };
+        trayStartup.CheckedChanged += (_, _) => Dispatcher.Invoke(() => SetStartup(trayStartup.Checked));
+        menu.Items.Add(trayStartup);
+        trayAlerts = new Forms.ToolStripMenuItem("Low 5-hour limit alerts") { CheckOnClick = true, Checked = settings.LowUsageAlerts };
+        trayAlerts.CheckedChanged += (_, _) => Dispatcher.Invoke(() => SetAlerts(trayAlerts.Checked));
+        menu.Items.Add(trayAlerts);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("Open Claude usage", null, (_, _) => OpenUrl("https://claude.ai/settings/usage"));
         menu.Items.Add("Open usage data folder", null, (_, _) => Process.Start(new ProcessStartInfo(DataStore.DirectoryPath) { UseShellExecute = true }));
@@ -76,19 +84,15 @@ public partial class MainWindow : Window
     private void OpenMenu(object sender, RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        // Local text style keeps the standard Windows menu readable on its light background.
-        var menuText = new Style(typeof(TextBlock));
-        menuText.Setters.Add(new Setter(TextBlock.ForegroundProperty, Color("#18212F")));
-        menuText.Setters.Add(new Setter(TextBlock.FontFamilyProperty, new FontFamily("Segoe UI")));
-        menu.Resources[typeof(TextBlock)] = menuText;
         void Add(string label, RoutedEventHandler handler, bool check = false, bool selected = false) {
             var item = new MenuItem { Header = label, IsCheckable = check, IsChecked = selected }; item.Click += handler; menu.Items.Add(item);
         }
-        Add("On desktop", (_, _) => SetMode("desktop"), true, settings.Mode == "desktop");
         Add("Always on top", (_, _) => SetMode("topmost"), true, settings.Mode == "topmost");
+        Add("On desktop (below other windows)", (_, _) => SetMode("desktop"), true, settings.Mode == "desktop");
         Add("Start with Windows", (_, _) => SetStartup(!StartupEnabled()), true, StartupEnabled());
+        Add("Low 5-hour limit alerts", (_, _) => SetAlerts(!settings.LowUsageAlerts), true, settings.LowUsageAlerts);
         menu.Items.Add(new Separator());
-        Add("Refresh Codex", async (_, _) => await Refresh());
+        Add("Refresh now", async (_, _) => await Refresh(true));
         Add("Open Claude usage", (_, _) => OpenUrl("https://claude.ai/settings/usage"));
         Add("Hide widget", (_, _) => Hide());
         Add("Quit", (_, _) => Quit());
@@ -98,72 +102,153 @@ public partial class MainWindow : Window
     }
 
     private static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-    private async void RefreshClick(object sender, RoutedEventArgs e) => await Refresh();
-    private void PinClick(object sender, RoutedEventArgs e) => SetMode(settings.Mode == "desktop" ? "topmost" : "desktop");
-    private async Task Refresh()
+    private async void RefreshClick(object sender, RoutedEventArgs e) => await Refresh(true);
+    private void PinClick(object sender, RoutedEventArgs e) => SetMode(settings.Mode == "topmost" ? "desktop" : "topmost");
+    private async Task Refresh(bool manual)
     {
-        if (codex.Refreshing || DateTimeOffset.UtcNow - lastManualRefresh < TimeSpan.FromSeconds(10)) return;
-        lastManualRefresh = DateTimeOffset.UtcNow;
+        if (codex.Refreshing || claude.Refreshing || DateTimeOffset.UtcNow - lastRefresh < TimeSpan.FromSeconds(10)) return;
+        lastRefresh = DateTimeOffset.UtcNow;
         RefreshButton.IsEnabled = false;
-        CodexStatus.Text = "Refreshing…";
-        await codex.RefreshAsync();
-        RefreshButton.IsEnabled = true;
+        var codexTask = codex.RefreshAsync();
+        var claudeTask = claude.RefreshAsync(manual);
         Render();
+        try { await Task.WhenAll(codexTask, claudeTask); }
+        finally { RefreshButton.IsEnabled = true; Render(); }
     }
 
     private void Render()
     {
         var now = DateTimeOffset.UtcNow;
-        var claudeState = DataStore.ReadSnapshot("claude.json");
+        var claudeAccount = DataStore.ReadSnapshot(ClaudeService.SnapshotName);
+        var claudeState = ClaudeService.Merge(claudeAccount, DataStore.ReadSnapshot("claude.json"));
         var codexState = DataStore.ReadSnapshot("codex.json");
-        DrawRows(ClaudeRows, claudeState, "#D99776", now, true);
-        DrawRows(CodexRows, codexState, "#87BBA7", now, false);
-        ClaudeStatus.Text = claudeState?.Windows.Count > 0 ? "Last Claude Code reading · " + UsageFormatting.Age(claudeState.UpdatedAt, now) : "Waiting for Claude Code · updates after a response";
-        ClaudeStatus.ToolTip = claudeState is null ? "Use your existing Claude Code session or start one. No messages are generated by this widget." : "Subscription usage from Claude Code. Other Claude activity may not appear until the next Claude Code response.\nLast reading: " + claudeState.UpdatedAt.ToLocalTime().ToString("f");
-        bool stale = codexState is not null && now - codexState.UpdatedAt > TimeSpan.FromMinutes(3);
-        CodexStatus.Text = codex.Refreshing ? "Refreshing…" : codex.Status ?? (codexState is null ? "Connecting to Codex…" : (stale ? "Last reading · " : "Updated · ") + UsageFormatting.Age(codexState.UpdatedAt, now));
-        CodexStatus.ToolTip = codexState?.UpdatedAt.ToLocalTime().ToString("f");
-        CodexPlan.Text = codexState?.Plan?.ToUpperInvariant() ?? "SUBSCRIPTION";
-        ModeLabel.Text = settings.Mode == "topmost" ? "Always on top" : desktopAttached ? "On your desktop" : "Desktop · behind windows";
-        PinButton.Content = settings.Mode == "topmost" ? "↙" : "↗";
+        DrawService(ClaudePanel, "Claude", "#D99776", claude.Plan ?? claudeAccount?.Plan, claudeState, claude.Refreshing, claude.Status, now,
+            "Claude subscription usage across claude.ai, Claude Code, and SDK tools, read with your Claude Code sign-in.");
+        DrawService(CodexPanel, "Codex", "#87BBA7", codexState?.Plan, codexState, codex.Refreshing, codex.Status, now,
+            "Codex subscription usage from the Codex CLI.");
+        CheckAlerts("Claude", claudeState, now);
+        CheckAlerts("Codex", codexState, now);
+        bool pinned = settings.Mode == "topmost";
+        // Filled, highlighted pin while always on top; muted crossed-out pin while on the desktop.
+        PinButton.Content = pinned ? "\uE841" : "\uE77A";
+        if (pinned) { PinButton.Foreground = Color("#F0F3F7"); PinButton.Background = Color("#2A3648"); }
+        else { PinButton.ClearValue(ForegroundProperty); PinButton.ClearValue(BackgroundProperty); }
+        PinButton.ToolTip = pinned ? "Always on top · click to place it on the desktop below other windows" : "On the desktop below other windows · click to keep it on top";
     }
 
     private static Brush Color(string value) => (Brush)new BrushConverter().ConvertFromString(value)!;
-    private static TextBlock Text(string value, double size, string color = "#F0F3F7") => new() { Text = value, FontSize = size, Foreground = Color(color) };
-    private static void DrawRows(StackPanel container, UsageSnapshot? state, string accent, DateTimeOffset now, bool claude)
+    private static TextBlock Text(string value, double size, string color = "#F0F3F7") => new() { Text = value, FontSize = size, Foreground = Color(color), VerticalAlignment = VerticalAlignment.Center };
+    private static string Severity(double remaining, string accent) => remaining <= 10 ? "#F08989" : remaining <= 25 ? "#E4BF7D" : accent;
+    private static string ResetTime(long reset) => DateTimeOffset.FromUnixTimeSeconds(reset).ToLocalTime().ToString("dddd, d MMMM 'at' HH:mm");
+
+    private static Grid Bar(double remaining, string color, double height)
     {
-        container.Children.Clear();
-        if (state is null || state.Windows.Count == 0)
+        var bar = new Grid { Height = height, ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center };
+        bar.Children.Add(new Border { Background = Color("#263140"), CornerRadius = new CornerRadius(height / 2) });
+        var fill = new Grid();
+        fill.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(remaining, GridUnitType.Star) });
+        fill.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100 - remaining, GridUnitType.Star) });
+        fill.Children.Add(new Border { Background = Color(color), CornerRadius = new CornerRadius(height / 2), Visibility = remaining <= 0 ? Visibility.Collapsed : Visibility.Visible });
+        bar.Children.Add(fill);
+        return bar;
+    }
+
+    // The shortest window (the 5-hour session when present) is the headline; longer windows are listed compactly below it.
+    private static void DrawService(StackPanel panel, string name, string accent, string? plan, UsageSnapshot? state, bool refreshing, string? problem, DateTimeOffset now, string about)
+    {
+        panel.Children.Clear();
+        var windows = state?.Windows ?? new List<UsageWindow>();
+        var primary = windows.OrderBy(w => w.WindowMinutes ?? int.MaxValue).FirstOrDefault();
+        double? remaining = primary is null || UsageFormatting.Expired(primary, now) ? null : Math.Clamp(100 - primary.UsedPercent, 0, 100);
+
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition()); head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent, ToolTip = about };
+        title.Children.Add(new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = Color(accent), Margin = new Thickness(0, 1, 7, 0), VerticalAlignment = VerticalAlignment.Center });
+        var label = Text(name, 13); label.FontWeight = FontWeights.SemiBold; title.Children.Add(label);
+        if (!string.IsNullOrWhiteSpace(plan)) { var badge = Text(plan.ToUpperInvariant(), 8.5, "#7F8B9C"); badge.Margin = new Thickness(6, 2, 0, 0); title.Children.Add(badge); }
+        head.Children.Add(title);
+        var value = new TextBlock { VerticalAlignment = VerticalAlignment.Bottom };
+        value.Inlines.Add(new Run(remaining is double r ? $"{r:0}%" : "—") { FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = Color(remaining is double low && low <= 25 ? Severity(low, accent) : remaining is null ? "#6B798C" : "#F0F3F7") });
+        if (remaining is not null) value.Inlines.Add(new Run(" left") { FontSize = 10, Foreground = Color("#7F8B9C") });
+        Grid.SetColumn(value, 1); head.Children.Add(value);
+        panel.Children.Add(head);
+
+        var hero = Bar(remaining ?? 0, Severity(remaining ?? 100, accent), 5); hero.Margin = new Thickness(0, 4, 0, 5);
+        panel.Children.Add(hero);
+
+        var caption = new Grid();
+        caption.ColumnDefinitions.Add(new ColumnDefinition()); caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        string when = primary is null ? "waiting for a reading" : UsageFormatting.Expired(primary, now) ? "awaiting update" : primary.ResetsAt is null ? "" : "resets in " + UsageFormatting.Short(primary.ResetsAt, now);
+        var detail = Text(primary is null ? "5-hour session · " + when : when.Length == 0 ? primary.Label : primary.Label + " · " + when, 10, "#9AA6B7");
+        detail.TextTrimming = TextTrimming.CharacterEllipsis;
+        if (primary?.ResetsAt is long reset) detail.ToolTip = "Resets " + ResetTime(reset);
+        caption.Children.Add(detail);
+        var age = Text(refreshing ? "updating…" : state is null ? "connecting…" : UsageFormatting.Age(state.UpdatedAt, now), 9.5, "#6F7C8E");
+        age.Margin = new Thickness(8, 0, 0, 0);
+        age.ToolTip = state is null ? about : "Last reading: " + state.UpdatedAt.ToLocalTime().ToString("f");
+        Grid.SetColumn(age, 1); caption.Children.Add(age);
+        panel.Children.Add(caption);
+
+        var others = windows.Where(w => w != primary).ToList();
+        if (others.Count > 0)
         {
-            foreach (string label in claude ? new[] { "5-hour session", "Weekly" } : new[] { "Subscription allowance" }) {
-                var holder = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-                var title = new Grid(); title.Children.Add(Text(label, 11, "#AAB5C5"));
-                var unknown = Text("—", 14, "#6B798C"); unknown.HorizontalAlignment = HorizontalAlignment.Right; title.Children.Add(unknown);
-                holder.Children.Add(title);
-                holder.Children.Add(new Border { Height = 5, Background = Color("#2A3545"), CornerRadius = new CornerRadius(2.5), Margin = new Thickness(0, 7, 0, 3) });
-                container.Children.Add(holder);
+            // One grid keeps the secondary bars aligned regardless of label length.
+            var list = new Grid { Margin = new Thickness(0, 7, 0, 0) };
+            list.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MaxWidth = 110 });
+            list.ColumnDefinitions.Add(new ColumnDefinition());
+            list.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            list.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            for (int i = 0; i < others.Count; i++)
+            {
+                var window = others[i];
+                bool expired = UsageFormatting.Expired(window, now);
+                double left = Math.Clamp(100 - window.UsedPercent, 0, 100);
+                list.RowDefinitions.Add(new RowDefinition { Height = new GridLength(17) });
+                string tip = window.Label + (expired ? " · awaiting update" : $" · {left:0}% left") + (window.ResetsAt is long at ? "\nResets " + ResetTime(at) : "");
+                var cells = new FrameworkElement[] {
+                    Text(window.Label, 10, "#AAB5C5"),
+                    Bar(expired ? 0 : left, Severity(left, accent), 3),
+                    Text(expired ? "—" : $"{left:0}%", 10, expired ? "#6B798C" : left <= 25 ? Severity(left, accent) : "#CAD3DF"),
+                    Text(expired ? "now" : UsageFormatting.Short(window.ResetsAt, now), 9.5, "#6F7C8E"),
+                };
+                ((TextBlock)cells[0]).TextTrimming = TextTrimming.CharacterEllipsis;
+                cells[1].Margin = new Thickness(10, 0, 0, 0);
+                cells[2].Margin = new Thickness(8, 0, 0, 0); cells[2].MinWidth = 28; ((TextBlock)cells[2]).TextAlignment = TextAlignment.Right; ((TextBlock)cells[2]).FontWeight = FontWeights.SemiBold;
+                cells[3].Margin = new Thickness(6, 0, 0, 0); cells[3].MinWidth = 36; ((TextBlock)cells[3]).TextAlignment = TextAlignment.Right;
+                for (int c = 0; c < cells.Length; c++) { cells[c].ToolTip = tip; Grid.SetRow(cells[c], i); Grid.SetColumn(cells[c], c); list.Children.Add(cells[c]); }
             }
-            return;
+            panel.Children.Add(list);
         }
-        foreach (var window in state.Windows)
+
+        if (problem is not null)
         {
-            bool expired = UsageFormatting.Expired(window, now);
-            double remaining = Math.Clamp(100 - window.UsedPercent, 0, 100);
-            var holder = new StackPanel { Margin = new Thickness(0, 0, 0, 11) };
-            var heading = new Grid(); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var label = Text(window.Label, 11, "#CAD3DF"); label.VerticalAlignment = VerticalAlignment.Center; label.TextTrimming = TextTrimming.CharacterEllipsis; label.ToolTip = window.Label; heading.Children.Add(label);
-            var percent = Text(expired ? "—" : $"{remaining:0}% left", 15, expired ? "#6B798C" : remaining <= 10 ? "#F08989" : "#F0F3F7"); percent.FontWeight = FontWeights.SemiBold; Grid.SetColumn(percent, 1); heading.Children.Add(percent);
-            holder.Children.Add(heading);
-            var bar = new Grid { Height = 5, Margin = new Thickness(0, 8, 0, 6), ClipToBounds = true };
-            bar.Children.Add(new Border { Background = Color("#2A3545"), CornerRadius = new CornerRadius(2.5) });
-            double value = expired ? 0 : remaining;
-            var fill = new Grid(); fill.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(value, GridUnitType.Star) }); fill.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100 - value, GridUnitType.Star) });
-            fill.Children.Add(new Border { Background = Color(remaining <= 10 ? "#F08989" : remaining <= 25 ? "#E4BF7D" : accent), CornerRadius = new CornerRadius(2.5), Visibility = value == 0 ? Visibility.Collapsed : Visibility.Visible });
-            bar.Children.Add(fill); holder.Children.Add(bar);
-            var countdown = Text(UsageFormatting.Countdown(window.ResetsAt, now), 10, "#9AA6B7");
-            if (window.ResetsAt is long reset) countdown.ToolTip = DateTimeOffset.FromUnixTimeSeconds(reset).ToLocalTime().ToString("dddd, d MMMM yyyy 'at' HH:mm");
-            holder.Children.Add(countdown); container.Children.Add(holder);
+            var notice = Text(problem, 10, "#E4BF7D"); notice.TextWrapping = TextWrapping.Wrap; notice.Margin = new Thickness(0, 6, 0, 0);
+            panel.Children.Add(notice);
         }
+    }
+
+    // Notifies once per 5-hour window when less than 10% remains; the entry is dropped once the window resets or recovers.
+    private void CheckAlerts(string service, UsageSnapshot? state, DateTimeOffset now)
+    {
+        if (state is null) return;
+        bool changed = settings.AlertedWindows.RemoveAll(entry => entry.StartsWith(service + "|") && entry.Split('|') is [_, _, var reset] && long.TryParse(reset, out long at) && at <= now.ToUnixTimeSeconds()) > 0;
+        foreach (var window in state.Windows.Where(w => w.WindowMinutes == 300))
+        {
+            string id = $"{service}|{window.Key}|{window.ResetsAt}";
+            // Sources can report the same reset a few seconds apart; treat those as one window.
+            bool Same(string entry) => entry == id || entry.Split('|') is [var s, var k, var r] && s == service && k == window.Key
+                && long.TryParse(r, out long at) && window.ResetsAt is long reset && Math.Abs(at - reset) < 900;
+            double left = Math.Clamp(100 - window.UsedPercent, 0, 100);
+            if (UsageFormatting.Expired(window, now) || left >= 10) { changed |= settings.AlertedWindows.RemoveAll(Same) > 0; continue; }
+            if (settings.AlertedWindows.Any(Same)) continue;
+            settings.AlertedWindows.Add(id); changed = true;
+            if (!settings.LowUsageAlerts) continue;
+            string reset = window.ResetsAt is long at ? $" · resets in {UsageFormatting.Short(at, now)} ({DateTimeOffset.FromUnixTimeSeconds(at).ToLocalTime():HH:mm})" : "";
+            tray.ShowBalloonTip(10_000, $"{service} 5-hour limit is low", $"{left:0}% left{reset}", Forms.ToolTipIcon.Warning);
+            DataStore.Log($"Low usage alert: {service} {window.Key}");
+        }
+        if (changed) DataStore.Write("settings.json", settings);
     }
 
     private void SetMode(string mode)
@@ -173,10 +258,10 @@ public partial class MainWindow : Window
     }
     private void ApplyMode()
     {
-        desktopAttached = NativeDesktop.Apply(this, settings.Mode == "desktop");
+        NativeDesktop.Apply(this, settings.Mode == "desktop");
         if (settings.X is int x && settings.Y is int y) NativeDesktop.Move(this, x, y, true);
         NativeDesktop.GetWindowRect(NativeDesktop.Handle(this), out var rect);
-        DataStore.Log($"Placement: attached={desktopAttached}, rect={rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
+        DataStore.Log($"Placement: mode={settings.Mode}, rect={rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
     }
     private void DragStart(object sender, MouseButtonEventArgs e)
     {
@@ -218,7 +303,11 @@ public partial class MainWindow : Window
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
         if (enabled) key.SetValue("AIUsageWidget", '"' + Environment.ProcessPath! + '"'); else key.DeleteValue("AIUsageWidget", false);
         settings.StartAtLogin = enabled; DataStore.Write("settings.json", settings);
-        if (tray.ContextMenuStrip?.Items[4] is Forms.ToolStripMenuItem item) item.Checked = enabled;
+        if (trayStartup is not null) trayStartup.Checked = enabled;
+    }
+    private void SetAlerts(bool enabled) {
+        settings.LowUsageAlerts = enabled; DataStore.Write("settings.json", settings);
+        if (trayAlerts is not null) trayAlerts.Checked = enabled;
     }
     private void Quit() {
         quitting = true; SavePosition(); displayTimer.Stop(); refreshTimer.Stop();

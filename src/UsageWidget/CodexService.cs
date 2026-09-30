@@ -60,6 +60,7 @@ public sealed class CodexService
     {
         while (await process.StandardOutput.ReadLineAsync(token) is string line)
         {
+            if (!line.StartsWith('{')) continue; // Ignore diagnostic output on stdout.
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement;
             if (!root.TryGetProperty("id", out var responseId) || !responseId.TryGetInt32(out var number) || number != id) continue;
