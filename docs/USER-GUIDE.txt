@@ -14,16 +14,21 @@ the widget is in always-on-top mode. New installations start in this mode.
 Controls
 --------
 Drag the title area to move the widget. Its position is saved.
-The arrow switches between desktop mode and always-on-top mode.
-The refresh button refreshes Codex; automatic refresh runs every 90 seconds.
+The pin switches between Always on top and On desktop.
+The refresh button refreshes Claude and Codex. Codex refreshes every 90
+seconds and Claude every 3 minutes.
 Hover over a reset countdown to see the exact local reset date and time.
 The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
+When a 5-hour limit drops below 10% remaining, a Windows notification is
+shown once for that window. Turn this off with Low 5-hour limit alerts.
 Start with Windows can be enabled in either menu; it is initially off.
 Double-click the tray icon to show the widget above other windows.
 
 Reading the bars
 ----------------
 Bars and percentages show REMAINING subscription allowance.
+The shortest window, normally the 5-hour session, is shown large for each
+service; longer windows such as weekly limits are listed below it.
 Codex windows are labelled by the duration returned by the account, rather
 than assuming every plan has the same limits. Multiple buckets are supported.
 Missing readings show a dash. After a reset passes, the old percentage is
@@ -31,18 +36,19 @@ hidden until a new reading arrives. The app never assumes a fresh allowance.
 
 Claude
 ------
-The usage feed is connected to your Claude Code status line.
-Readings become available after a Claude Code response and update when
-Claude Code supplies new data. If necessary, restart your existing Claude
-Code session for it to load the new status-line command.
-Activity elsewhere in Claude may not appear until the next Claude Code
-response. The displayed timestamp identifies the last Claude Code reading.
+Claude usage is read from your Claude account through the sign-in that
+Claude Code already has; no extra setup is needed. It covers claude.ai,
+Claude Code, and SDK-based tools, including model-specific weekly limits.
+The sign-in is read for each request and never stored or refreshed by the
+widget. If it has expired, open Claude Code once to renew it.
 The widget does not send Claude messages or consume model tokens.
-The original status-line command is saved and invoked by the wrapper; if
-that command fails, a simple model/context status line is shown instead.
-All unrelated Claude settings are preserved.
 
-If this folder is moved, run CONNECT-CLAUDE.cmd from its new location.
+Optional: run CONNECT-CLAUDE.cmd to also receive a reading after every
+Claude Code response through its status line. The original status-line
+command is saved and invoked by the wrapper; if that command fails, a
+simple model/context status line is shown instead. All unrelated Claude
+settings are preserved. If this folder is moved, run CONNECT-CLAUDE.cmd
+from its new location.
 To restore the previous Claude status line, run DISCONNECT-CLAUDE.cmd.
 These scripts use the Node.js installation already present on this PC.
 
@@ -58,11 +64,9 @@ out, sign in through Codex CLI and refresh the widget.
 
 Desktop mode
 ------------
-The widget is attached to Windows' desktop host, so normal app windows cover
-it and it appears when you view the desktop. Your wallpaper is not modified.
-If Windows cannot expose its desktop host, the app uses a window behind other
-windows instead. The status label reports that fallback.
-After restarting Windows Explorer, reopen the widget if needed.
+The widget stays below every other window, even when clicked, so it is only
+visible where no app covers it. It keeps its taskbar button. Show desktop
+(Win+D) hides it along with other windows. Your wallpaper is not modified.
 
 Remove
 ------

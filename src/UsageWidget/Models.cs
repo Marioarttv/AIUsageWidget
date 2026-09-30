@@ -11,6 +11,8 @@ public sealed class WidgetSettings
     public int? X { get; set; }
     public int? Y { get; set; }
     public bool StartAtLogin { get; set; }
+    public bool LowUsageAlerts { get; set; } = true;
+    public List<string> AlertedWindows { get; set; } = new();
 }
 
 public static class DataStore
@@ -58,6 +60,15 @@ public static class UsageFormatting
         if (remaining.TotalDays >= 1) return $"Resets in {(int)remaining.TotalDays}d {remaining.Hours}h";
         if (remaining.TotalHours >= 1) return $"Resets in {(int)remaining.TotalHours}h {remaining.Minutes}m";
         return $"Resets in {Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes))}m";
+    }
+    public static string Short(long? reset, DateTimeOffset now)
+    {
+        if (reset is null) return "—";
+        var remaining = DateTimeOffset.FromUnixTimeSeconds(reset.Value) - now;
+        if (remaining.TotalSeconds <= 0) return "now";
+        if (remaining.TotalDays >= 1) return $"{(int)remaining.TotalDays}d {remaining.Hours}h";
+        if (remaining.TotalHours >= 1) return $"{(int)remaining.TotalHours}h {remaining.Minutes}m";
+        return $"{Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes))}m";
     }
     public static string Age(DateTimeOffset updated, DateTimeOffset now)
     {
