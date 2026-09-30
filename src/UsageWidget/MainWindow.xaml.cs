@@ -50,15 +50,9 @@ public partial class MainWindow : Window
 
     private static System.Drawing.Icon MakeIcon()
     {
-        using var bitmap = new System.Drawing.Bitmap(32, 32);
-        using var g = System.Drawing.Graphics.FromImage(bitmap);
-        g.Clear(System.Drawing.Color.Transparent);
-        using var green = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(135, 187, 167));
-        using var orange = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(217, 151, 118));
-        g.FillRectangle(orange, 5, 13, 8, 14); g.FillRectangle(green, 18, 5, 8, 22);
-        var handle = bitmap.GetHicon();
-        try { using var borrowed = System.Drawing.Icon.FromHandle(handle); return (System.Drawing.Icon)borrowed.Clone(); }
-        finally { NativeDesktop.DestroyIcon(handle); }
+        using var stream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/widget.ico")).Stream;
+        using var icon = new System.Drawing.Icon(stream, new System.Drawing.Size(32, 32));
+        return (System.Drawing.Icon)icon.Clone();
     }
 
     private Forms.ContextMenuStrip BuildTrayMenu()

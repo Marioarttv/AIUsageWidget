@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const setup = path.resolve(__dirname, '../setup-claude.cjs');
+const setup = path.resolve(__dirname, '../scripts/setup-claude.cjs');
 
 test('setup is repeatable, preserves unrelated settings, and restores the original status line', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-widget-setup-test-'));

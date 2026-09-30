@@ -19,7 +19,7 @@ public partial class App : System.Windows.Application
             _ = RunCheckAsync();
             return;
         }
-        instance = new Mutex(true, "Local\\AIUsageWidget.Mario.v1", out bool created);
+        instance = new Mutex(true, "Local\\AIUsageWidget.v1", out bool created);
         if (!created) {
             DataStore.Write("request.json", new { action = e.Args.Contains("--desktop") ? "desktop" : e.Args.Contains("--show") ? "reveal" : "show", id = Guid.NewGuid().ToString("N") });
             Shutdown(); return;
