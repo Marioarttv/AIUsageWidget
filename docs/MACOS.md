@@ -17,7 +17,7 @@ The build uses an existing Apple Development signing identity when available, wi
 - **Desktop mode** is the default: the panel sits above the desktop icons and below application windows. It appears on desktop Spaces without appearing in the application switcher.
 - **Pin** switches to a floating panel above normal windows. Full-screen behavior depends on the active Space and macOS; system/security surfaces retain their own ordering.
 - **Drag the AI USAGE title** to reposition the panel. The position and display mode persist. Disconnecting a display brings an offscreen panel back onto an available display.
-- **CL / CX in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
+- **The Claude and ChatGPT marks in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
 - **⋯** contains show/hide, reposition, launch at login, both alert toggles, a test notification, notification settings, and Claude connection access.
 - **↻** refreshes manually. Requests still respect the provider's minimum interval and rate-limit backoff.
 - Hover over a reset time for the exact local date and time. Expired windows show “awaiting update” instead of inventing a full allowance. Failed readings retain visibly dimmed last-known data with an explanation.
@@ -44,6 +44,8 @@ Detection happens at the next successful refresh, normally within roughly three 
 - Claude's account-usage endpoint is not a public, stable API and can change. The app honors HTTP 429 and `Retry-After`, including date-form headers. It does not install or change Claude status-line configuration.
 
 Usage snapshots and alert history are stored in `~/Library/Application Support/AIUsageWidget/usage.json`. The directory is private to the user. Preferences use the `com.mariomanzocco.aiusagewidget` defaults domain. No conversation content or authentication tokens are stored there.
+
+Menu-bar marks use [Simple Icons](https://simpleicons.org) path data (CC0); the logos are trademarks of Anthropic and OpenAI.
 
 Interface documentation: [Codex app server](https://learn.chatgpt.com/docs/app-server), [Claude credential storage](https://code.claude.com/docs/en/authentication).
 

@@ -185,4 +185,40 @@ final class UsageCoreTests: XCTestCase {
         ledger.observe(snapshot(0, reset: now.addingTimeInterval(18000), at: now.addingTimeInterval(10)), provider: .claude, lowEnabled: true, resetEnabled: true, now: now.addingTimeInterval(10))
         XCTAssertEqual(ledger.pending.map(\.kind), [.reset])
     }
+
+    func testSVGPathCompactNumbersAndRelativeCommands() {
+        let box = SVGPath.cgPath("M1.5.5h2v-.5l-1-1.5-.5.5z").boundingBoxOfPath
+        XCTAssertEqual(box.minX, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(box.maxX, 3.5, accuracy: 0.0001)
+        XCTAssertEqual(box.minY, -1.5, accuracy: 0.0001)
+        XCTAssertEqual(box.maxY, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(SVGPath.cgPath("M0 0L1e1 0 10 5").boundingBoxOfPath.maxX, 10, accuracy: 0.0001)
+    }
+    func testSVGPathArcsFollowFlags() {
+        // Upper and lower half circles of radius 5 between (0,5) and (10,5), with compact flags.
+        let upper = SVGPath.cgPath("M0 5a5 5 0 0110 0").boundingBoxOfPath
+        XCTAssertEqual(upper.minY, 0, accuracy: 0.01)
+        XCTAssertEqual(upper.maxY, 5, accuracy: 0.01)
+        let lower = SVGPath.cgPath("M0 5A5 5 0 0 0 10 5").boundingBoxOfPath
+        XCTAssertEqual(lower.maxY, 10, accuracy: 0.01)
+        XCTAssertEqual(lower.minY, 5, accuracy: 0.01)
+        // A too-small radius scales up to reach the endpoint.
+        XCTAssertEqual(SVGPath.cgPath("M0 0A1 1 0 0 1 10 0").boundingBoxOfPath.width, 10, accuracy: 0.01)
+    }
+    func testSVGPathSmoothCurveReflectsControlPoint() {
+        let box = SVGPath.cgPath("M0 0C0 10 10 10 10 0S20 -10 20 0").boundingBoxOfPath
+        XCTAssertEqual(box.minY, -7.5, accuracy: 0.01)
+        XCTAssertEqual(box.maxY, 7.5, accuracy: 0.01)
+    }
+    func testBrandMarksFillTheCanvas() {
+        for provider in ProviderID.allCases {
+            let box = BrandMark.path(for: provider).boundingBoxOfPath
+            XCTAssertGreaterThan(box.width, 20, provider.rawValue)
+            XCTAssertGreaterThan(box.height, 20, provider.rawValue)
+            XCTAssertGreaterThanOrEqual(box.minX, -0.01, provider.rawValue)
+            XCTAssertLessThanOrEqual(box.maxX, BrandMark.canvas + 0.01, provider.rawValue)
+            XCTAssertGreaterThanOrEqual(box.minY, -0.01, provider.rawValue)
+            XCTAssertLessThanOrEqual(box.maxY, BrandMark.canvas + 0.01, provider.rawValue)
+        }
+    }
 }

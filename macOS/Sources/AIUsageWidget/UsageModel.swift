@@ -176,14 +176,15 @@ final class UsageModel: ObservableObject {
     func openNotificationSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
-    var menuTitle: String {
+    var menuReadings: [(provider: ProviderID, value: String)] {
         ProviderID.allCases.map { provider in
             let state = services[provider]
             let value = state?.snapshot?.primary
             let number = value.flatMap { !($0.expired(at: now)) && state?.stale(at: now) == false ? "\(Int($0.remaining.rounded(.down)))%" : nil } ?? "—"
-            return "\(provider == .claude ? "CL" : "CX") \(number)"
-        }.joined(separator: "  ")
+            return (provider, number)
+        }
     }
+    var menuTitle: String { menuReadings.map { "\($0.provider.title) \($0.value)" }.joined(separator: " · ") }
 
     func writeDiagnostics(window: NSWindow) {
         let data: [String: Any] = [
