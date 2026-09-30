@@ -7,7 +7,8 @@ import UsageCore
 struct ServiceState {
     var snapshot: UsageSnapshot?
     var status: String?
-    func stale(at now: Date) -> Bool { status != nil || snapshot.map { now.timeIntervalSince($0.updatedAt) > 600 } ?? true }
+    // Longer than the unwatched refresh interval, so a quiet reading isn't dimmed between refreshes.
+    func stale(at now: Date) -> Bool { status != nil || snapshot.map { now.timeIntervalSince($0.updatedAt) > 900 } ?? true }
 }
 
 private struct RuntimeCache: Codable {
@@ -24,7 +25,7 @@ final class UsageModel: ObservableObject {
         didSet { UserDefaults.standard.set(topmost, forKey: "topmost"); onWindowSettings?() }
     }
     @Published var panelVisible = UserDefaults.standard.object(forKey: "panelVisible") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(panelVisible, forKey: "panelVisible"); onWindowSettings?(); updateDisplayTimer() }
+        didSet { UserDefaults.standard.set(panelVisible, forKey: "panelVisible"); onWindowSettings?(); viewChanged() }
     }
     @Published var lowAlerts = UserDefaults.standard.object(forKey: "lowAlerts") as? Bool ?? true {
         didSet { UserDefaults.standard.set(lowAlerts, forKey: "lowAlerts") }
@@ -44,7 +45,11 @@ final class UsageModel: ObservableObject {
     private var refreshTimer: Timer?
     private var displayTimer: Timer?
     private var suspended = false
-    var popoverVisible = false { didSet { updateDisplayTimer() } }
+    var popoverVisible = false { didSet { viewChanged() } }
+    /// True while another window fully covers the desktop panel. macOS sends no occlusion updates for it.
+    var panelCovered: (() -> Bool)?
+    private var viewed: Bool { popoverVisible || (panelVisible && !(panelCovered?() ?? false)) }
+    private var lastRefresh = Date.distantPast
     private(set) var refreshCount = 0
     private(set) var startedAt = Date()
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -105,6 +110,7 @@ final class UsageModel: ObservableObject {
                 }
             }
             refreshCount += 1
+            lastRefresh = Date()
             await updateNotificationStatus()
             refreshing = false
             onUpdate?()
@@ -116,7 +122,9 @@ final class UsageModel: ObservableObject {
         guard !suspended else { return }
         let now = Date()
         let nextReset = services.values.flatMap { $0.snapshot?.windows ?? [] }.compactMap(\.resetsAt).filter { $0 > now }.min()
-        let interval = min(180, max(30, nextReset.map { $0.timeIntervalSince(now) + 5 } ?? 180))
+        // Unwatched, only alerts need readings: check every 10 minutes, still waking for a known reset.
+        let cap: TimeInterval = viewed ? 180 : 600
+        let interval = min(cap, max(30, nextReset.map { $0.timeIntervalSince(now) + 5 } ?? cap))
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -125,6 +133,11 @@ final class UsageModel: ObservableObject {
         refreshTimer = timer
     }
 
+    private func viewChanged() { updateDisplayTimer(); catchUp() }
+    /// Refreshes when the widget comes back into view after a longer unwatched interval.
+    private func catchUp() {
+        if refreshCount > 0, Date().timeIntervalSince(lastRefresh) >= 180, viewed { refresh() }
+    }
     private func updateDisplayTimer() {
         displayTimer?.invalidate(); displayTimer = nil
         guard !suspended, panelVisible || popoverVisible else { return }
@@ -132,6 +145,7 @@ final class UsageModel: ObservableObject {
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.now = Date()
+                self?.catchUp()
                 self?.onUpdate?()
             }
         }
@@ -187,12 +201,16 @@ final class UsageModel: ObservableObject {
     var menuTitle: String { menuReadings.map { "\($0.provider.title) \($0.value)" }.joined(separator: " · ") }
 
     func writeDiagnostics(window: NSWindow) {
+        Task { writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads) }
+    }
+    private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int) {
         let data: [String: Any] = [
             "version": "1.2.0", "startedAt": startedAt.timeIntervalSince1970,
             "refreshCount": refreshCount, "refreshing": refreshing, "suspended": suspended,
             "windowVisible": window.isVisible, "windowLevel": window.level.rawValue,
             "mode": topmost ? "floating" : "desktop", "menuTitle": menuTitle,
             "notifications": notificationStatus, "lowAlerts": lowAlerts, "resetAlerts": resetAlerts,
+            "watched": viewed, "nextRefreshIn": Int(refreshTimer.map { $0.isValid ? $0.fireDate.timeIntervalSinceNow : 0 } ?? 0), "claudeKeychainReads": claudeKeychainReads,
             "services": Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { id in
                 (id.rawValue, ["windowCount": services[id]?.snapshot?.windows.count ?? 0,
                               "status": services[id]?.status ?? "connected"] as [String: Any])

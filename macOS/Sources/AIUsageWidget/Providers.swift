@@ -130,37 +130,60 @@ actor ClaudeProvider {
         return URLSession(configuration: config)
     }()
 
+    /// Kept in memory only, until it nears expiry or Claude rejects it, so refreshes skip the Keychain read.
+    private var credential: ClaudeCredentials.Credential?
+    private(set) var keychainReads = 0
+
     func refresh(manual: Bool = false, allowKeychainUI: Bool = false) async -> ProviderResult {
         let now = Date()
         guard now >= backoffUntil, now.timeIntervalSince(lastAttempt) >= (manual ? 30 : 150) else { return .skipped }
-        let credentials = await Task.detached(priority: .utility) { ClaudeCredentials.read(allowUI: allowKeychainUI) }.value
-        switch credentials {
-        case .failure(let message): return .failure(message)
-        case .success(let credential):
-            guard credential.expiresAt.map({ $0 > now }) ?? true else { return .failure("Claude sign-in expired · open Claude Code to renew") }
-            // A denied Keychain read isn't an HTTP attempt: Connect must work immediately afterwards.
-            lastAttempt = Date()
-            var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-            request.setValue("Bearer " + credential.token, forHTTPHeaderField: "Authorization")
-            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-            request.setValue("AIUsageWidget/1.2.0", forHTTPHeaderField: "User-Agent")
-            do {
-                let (data, response) = try await session.data(for: request)
-                guard let http = response as? HTTPURLResponse else { return .failure("Claude returned an invalid response") }
-                switch http.statusCode {
-                case 401, 403: return .failure("Claude sign-in expired · open Claude Code to renew")
-                case 429:
-                    let seconds = Self.retryDelay(http.value(forHTTPHeaderField: "Retry-After"), now: Date())
-                    backoffUntil = Date().addingTimeInterval(seconds)
-                    return .failure("Claude usage busy · retrying later")
-                case 200: break
-                default: return .failure("Claude unavailable · retrying automatically")
-                }
-                guard data.count < 1_000_000 else { return .failure("Claude returned an invalid response") }
-                let snapshot = try UsageParser.claude(data, plan: credential.plan)
-                return snapshot.windows.isEmpty ? .failure("No Claude subscription windows returned") : .reading(snapshot)
-            } catch { return .failure("Claude refresh failed · showing last reading") }
+        var fromKeychain = false
+        if allowKeychainUI || !(credential?.valid(at: now.addingTimeInterval(60)) ?? false) {
+            if let failure = await readCredential(allowUI: allowKeychainUI) { return failure }
+            fromKeychain = true
         }
+        guard let current = credential, current.valid(at: now) else { return .failure("Claude sign-in expired · open Claude Code to renew") }
+        // A denied Keychain read isn't an HTTP attempt: Connect must work immediately afterwards.
+        lastAttempt = Date()
+        if let result = await fetch(current) { return result }
+        // Rejected: Claude Code may have renewed the sign-in since it was cached.
+        if !fromKeychain, await readCredential(allowUI: false) == nil, let renewed = credential, renewed.token != current.token,
+           renewed.valid(at: Date()), let result = await fetch(renewed) { return result }
+        credential = nil
+        return .failure("Claude sign-in expired · open Claude Code to renew")
+    }
+
+    /// Replaces the cached credential; returns a failure to report, or nil on success.
+    private func readCredential(allowUI: Bool) async -> ProviderResult? {
+        keychainReads += 1
+        switch await Task.detached(priority: .utility, operation: { ClaudeCredentials.read(allowUI: allowUI) }).value {
+        case .failure(let message): credential = nil; return .failure(message)
+        case .success(let read): credential = read; return nil
+        }
+    }
+
+    /// Returns nil when Claude rejects the token.
+    private func fetch(_ credential: ClaudeCredentials.Credential) async -> ProviderResult? {
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+        request.setValue("Bearer " + credential.token, forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("AIUsageWidget/1.2.0", forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failure("Claude returned an invalid response") }
+            switch http.statusCode {
+            case 401, 403: return nil
+            case 429:
+                let seconds = Self.retryDelay(http.value(forHTTPHeaderField: "Retry-After"), now: Date())
+                backoffUntil = Date().addingTimeInterval(seconds)
+                return .failure("Claude usage busy · retrying later")
+            case 200: break
+            default: return .failure("Claude unavailable · retrying automatically")
+            }
+            guard data.count < 1_000_000 else { return .failure("Claude returned an invalid response") }
+            let snapshot = try UsageParser.claude(data, plan: credential.plan)
+            return snapshot.windows.isEmpty ? .failure("No Claude subscription windows returned") : .reading(snapshot)
+        } catch { return .failure("Claude refresh failed · showing last reading") }
     }
 
     private static func retryDelay(_ value: String?, now: Date) -> TimeInterval {
@@ -174,7 +197,10 @@ actor ClaudeProvider {
 }
 
 private enum ClaudeCredentials {
-    struct Credential { let token: String; let plan: String?; let expiresAt: Date? }
+    struct Credential {
+        let token: String; let plan: String?; let expiresAt: Date?
+        func valid(at date: Date) -> Bool { expiresAt.map { $0 > date } ?? true }
+    }
     enum ReadResult { case success(Credential), failure(String) }
     static func read(allowUI: Bool) -> ReadResult {
         let configured = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
