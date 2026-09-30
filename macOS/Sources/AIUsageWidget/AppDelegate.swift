@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private let popover = NSPopover()
     private var subscriptions = Set<AnyCancellable>()
     private var resizing = false
+    private var statusTitle: String?
     private var positionSave: DispatchWorkItem?
     private let commandName = Notification.Name("com.mariomanzocco.aiusagewidget.command")
 
@@ -43,8 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         if let button = statusItem.button {
             button.target = self; button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            button.toolTip = "AI Usage · CL: Claude · CX: Codex\nClick for allowance and reset times."
+            button.imagePosition = .imageOnly
+            button.toolTip = "AI Usage · Claude and Codex remaining allowance\nClick for allowance and reset times."
             button.setAccessibilityLabel("AI Usage Widget menu bar")
         }
         popover.behavior = .transient
@@ -68,7 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func updatePresentation() {
         guard panel != nil else { return }
-        statusItem.button?.title = model.menuTitle
+        let title = model.menuTitle
+        if title != statusTitle, let button = statusItem.button {
+            statusTitle = title
+            button.image = StatusIcon.image(model.menuReadings)
+            button.setAccessibilityTitle(title)
+        }
         let height = ceil(hosting.fittingSize.height)
         if height > 0 && abs(height - panel.frame.height) > 1 {
             resizing = true
