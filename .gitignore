@@ -7,3 +7,6 @@ app/
 *.zip
 Thumbs.db
 .DS_Store
+macOS/.build/
+macOS/build/
+macOS/.swiftpm/
