@@ -180,7 +180,10 @@ private enum ClaudeCredentials {
         let configured = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
         var data: Data?
         // A custom config directory has a distinct Keychain identity. The file fallback is supported here.
-        if configured == nil {
+        // Claude Code writes the item with /usr/bin/security, so that tool is on its ACL and reads silently.
+        // Claude Code rewrites the item on token renewal, so an "Always Allow" granted to this app doesn't last.
+        if configured == nil { data = viaSecurityTool() }
+        if configured == nil, data == nil {
             // Claude uses the legacy login Keychain. LAContext alone does not suppress its ACL
             // prompts, so bracket this one serialized read with the legacy interaction control.
             var previousInteraction = DarwinBoolean(true)
@@ -210,5 +213,23 @@ private enum ClaudeCredentials {
         }
         let expiry = (oauth["expiresAt"] as? Double).flatMap { $0.isFinite && $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil }
         return .success(Credential(token: token, plan: oauth["subscriptionType"] as? String, expiresAt: expiry))
+    }
+
+    private static func viaSecurityTool() -> Data? {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let timer = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 10, execute: timer)
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        timer.cancel()
+        try? output.fileHandleForReading.close()
+        guard process.terminationReason == .exit, process.terminationStatus == 0, data.count < 100_000 else { return nil }
+        return data
     }
 }
