@@ -15,8 +15,8 @@ Controls
 --------
 Drag the title area to move the widget. Its position is saved.
 The pin switches between Always on top and On desktop.
-The refresh button refreshes Claude and Codex. Codex refreshes every 90
-seconds and Claude every 3 minutes.
+The refresh button refreshes Claude and Codex; both refresh automatically
+every 3 minutes.
 Hover over a reset countdown to see the exact local reset date and time.
 The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
 When a 5-hour limit drops below 10% remaining, a Windows notification is

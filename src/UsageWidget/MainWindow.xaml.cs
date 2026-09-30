@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
-using Forms = System.Windows.Forms;
 
 namespace UsageWidget;
 
@@ -17,9 +17,10 @@ public partial class MainWindow : Window
     private readonly ClaudeService claude = new();
     private readonly WidgetSettings settings = DataStore.Read<WidgetSettings>("settings.json") ?? new();
     private readonly DispatcherTimer displayTimer = new() { Interval = TimeSpan.FromSeconds(5) };
-    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(90) };
-    private readonly Forms.NotifyIcon tray;
-    private Forms.ToolStripMenuItem? trayStartup, trayAlerts;
+    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromMinutes(3) };
+    private readonly TrayIcon tray;
+    private readonly Dictionary<string, (DateTime Written, UsageSnapshot? Value)> snapshots = new();
+    private readonly Dictionary<Panel, string> drawn = new();
     private DateTimeOffset lastRefresh = DateTimeOffset.MinValue;
     private NativeDesktop.POINT? dragOrigin;
     private NativeDesktop.RECT dragRect;
@@ -33,10 +34,10 @@ public partial class MainWindow : Window
         else if (settings.Mode != "topmost") settings.Mode = "desktop";
         Left = SystemParameters.WorkArea.Right - Width - 28;
         Top = SystemParameters.WorkArea.Top + 60;
-        tray = new Forms.NotifyIcon { Icon = MakeIcon(), Text = "AI Usage Widget", Visible = true };
-        tray.ContextMenuStrip = BuildTrayMenu();
-        tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); });
-        tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); Activate(); });
+        tray = new TrayIcon("AI Usage Widget");
+        tray.DoubleClick += Reveal;
+        tray.BalloonClick += Reveal;
+        tray.MenuRequested += () => { tray.PrepareMenu(); var menu = BuildMenu(true); menu.Placement = PlacementMode.MousePoint; menu.IsOpen = true; };
         Loaded += async (_, _) => {
             DataStore.Log("Widget loaded: mode=" + settings.Mode);
             NativeDesktop.KeepAtBottom(this, () => settings.Mode == "desktop");
@@ -53,40 +54,24 @@ public partial class MainWindow : Window
         };
     }
 
-    private static System.Drawing.Icon MakeIcon()
-    {
-        using var stream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/widget.ico")).Stream;
-        using var icon = new System.Drawing.Icon(stream, new System.Drawing.Size(32, 32));
-        return (System.Drawing.Icon)icon.Clone();
-    }
-
-    private Forms.ContextMenuStrip BuildTrayMenu()
-    {
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Show widget", null, (_, _) => Dispatcher.Invoke(() => { Show(); SetMode("topmost"); Activate(); }));
-        menu.Items.Add("Always on top", null, (_, _) => Dispatcher.Invoke(() => SetMode("topmost")));
-        menu.Items.Add("On desktop (below other windows)", null, (_, _) => Dispatcher.Invoke(() => SetMode("desktop")));
-        menu.Items.Add("Refresh now", null, (_, _) => Dispatcher.InvokeAsync(() => Refresh(true)));
-        trayStartup = new Forms.ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = StartupEnabled() };
-        trayStartup.CheckedChanged += (_, _) => Dispatcher.Invoke(() => SetStartup(trayStartup.Checked));
-        menu.Items.Add(trayStartup);
-        trayAlerts = new Forms.ToolStripMenuItem("Low 5-hour limit alerts") { CheckOnClick = true, Checked = settings.LowUsageAlerts };
-        trayAlerts.CheckedChanged += (_, _) => Dispatcher.Invoke(() => SetAlerts(trayAlerts.Checked));
-        menu.Items.Add(trayAlerts);
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Open Claude usage", null, (_, _) => OpenUrl("https://claude.ai/settings/usage"));
-        menu.Items.Add("Open usage data folder", null, (_, _) => Process.Start(new ProcessStartInfo(DataStore.DirectoryPath) { UseShellExecute = true }));
-        menu.Items.Add("Hide widget", null, (_, _) => Dispatcher.Invoke(Hide));
-        menu.Items.Add("Quit", null, (_, _) => Dispatcher.Invoke(Quit));
-        return menu;
-    }
+    private void Reveal() { Show(); SetMode("topmost"); Activate(); }
 
     private void OpenMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = BuildMenu(false);
+        menu.PlacementTarget = (Button)sender;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    // One menu serves both the settings button and the tray icon.
+    private ContextMenu BuildMenu(bool fromTray)
     {
         var menu = new ContextMenu();
         void Add(string label, RoutedEventHandler handler, bool check = false, bool selected = false) {
             var item = new MenuItem { Header = label, IsCheckable = check, IsChecked = selected }; item.Click += handler; menu.Items.Add(item);
         }
+        if (fromTray) { Add("Show widget", (_, _) => Reveal()); menu.Items.Add(new Separator()); }
         Add("Always on top", (_, _) => SetMode("topmost"), true, settings.Mode == "topmost");
         Add("On desktop (below other windows)", (_, _) => SetMode("desktop"), true, settings.Mode == "desktop");
         Add("Start with Windows", (_, _) => SetStartup(!StartupEnabled()), true, StartupEnabled());
@@ -94,11 +79,10 @@ public partial class MainWindow : Window
         menu.Items.Add(new Separator());
         Add("Refresh now", async (_, _) => await Refresh(true));
         Add("Open Claude usage", (_, _) => OpenUrl("https://claude.ai/settings/usage"));
+        Add("Open usage data folder", (_, _) => OpenUrl(DataStore.DirectoryPath));
         Add("Hide widget", (_, _) => Hide());
         Add("Quit", (_, _) => Quit());
-        menu.PlacementTarget = (Button)sender;
-        menu.IsOpen = true;
-        e.Handled = true;
+        return menu;
     }
 
     private static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
@@ -114,14 +98,15 @@ public partial class MainWindow : Window
         Render();
         try { await Task.WhenAll(codexTask, claudeTask); }
         finally { RefreshButton.IsEnabled = true; Render(); }
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(NativeDesktop.TrimMemory));
     }
 
     private void Render()
     {
         var now = DateTimeOffset.UtcNow;
-        var claudeAccount = DataStore.ReadSnapshot(ClaudeService.SnapshotName);
-        var claudeState = ClaudeService.Merge(claudeAccount, DataStore.ReadSnapshot("claude.json"));
-        var codexState = DataStore.ReadSnapshot("codex.json");
+        var claudeAccount = Snapshot(ClaudeService.SnapshotName);
+        var claudeState = ClaudeService.Merge(claudeAccount, Snapshot("claude.json"));
+        var codexState = Snapshot("codex.json");
         DrawService(ClaudePanel, "Claude", "#D99776", claude.Plan ?? claudeAccount?.Plan, claudeState, claude.Refreshing, claude.Status, now,
             "Claude subscription usage across claude.ai, Claude Code, and SDK tools, read with your Claude Code sign-in.");
         DrawService(CodexPanel, "Codex", "#87BBA7", codexState?.Plan, codexState, codex.Refreshing, codex.Status, now,
@@ -136,7 +121,22 @@ public partial class MainWindow : Window
         PinButton.ToolTip = pinned ? "Always on top · click to place it on the desktop below other windows" : "On the desktop below other windows · click to keep it on top";
     }
 
-    private static Brush Color(string value) => (Brush)new BrushConverter().ConvertFromString(value)!;
+    // Snapshot files are parsed again only after they change.
+    private UsageSnapshot? Snapshot(string name)
+    {
+        var written = File.GetLastWriteTimeUtc(Path.Combine(DataStore.DirectoryPath, name));
+        if (snapshots.TryGetValue(name, out var cached) && cached.Written == written) return cached.Value;
+        var value = DataStore.ReadSnapshot(name);
+        snapshots[name] = (written, value);
+        return value;
+    }
+
+    private static readonly Dictionary<string, Brush> brushes = new();
+    private static Brush Color(string value)
+    {
+        if (!brushes.TryGetValue(value, out var brush)) { brush = (Brush)new BrushConverter().ConvertFromString(value)!; brush.Freeze(); brushes[value] = brush; }
+        return brush;
+    }
     private static TextBlock Text(string value, double size, string color = "#F0F3F7") => new() { Text = value, FontSize = size, Foreground = Color(color), VerticalAlignment = VerticalAlignment.Center };
     private static string Severity(double remaining, string accent) => remaining <= 10 ? "#F08989" : remaining <= 25 ? "#E4BF7D" : accent;
     private static string ResetTime(long reset) => DateTimeOffset.FromUnixTimeSeconds(reset).ToLocalTime().ToString("dddd, d MMMM 'at' HH:mm");
@@ -154,10 +154,15 @@ public partial class MainWindow : Window
     }
 
     // The shortest window (the 5-hour session when present) is the headline; longer windows are listed compactly below it.
-    private static void DrawService(StackPanel panel, string name, string accent, string? plan, UsageSnapshot? state, bool refreshing, string? problem, DateTimeOffset now, string about)
+    private void DrawService(StackPanel panel, string name, string accent, string? plan, UsageSnapshot? state, bool refreshing, string? problem, DateTimeOffset now, string about)
     {
-        panel.Children.Clear();
         var windows = state?.Windows ?? new List<UsageWindow>();
+        // Rebuild only when something visible changed; countdowns and ages change at most once a minute.
+        string key = string.Join("|", plan, refreshing, problem, state?.UpdatedAt.ToUnixTimeSeconds(), state is null ? "" : UsageFormatting.Age(state.UpdatedAt, now),
+            string.Join(";", windows.Select(w => $"{w.Key}:{w.Label}:{w.UsedPercent}:{UsageFormatting.Short(w.ResetsAt, now)}")));
+        if (drawn.TryGetValue(panel, out var last) && last == key) return;
+        drawn[panel] = key;
+        panel.Children.Clear();
         var primary = windows.OrderBy(w => w.WindowMinutes ?? int.MaxValue).FirstOrDefault();
         double? remaining = primary is null || UsageFormatting.Expired(primary, now) ? null : Math.Clamp(100 - primary.UsedPercent, 0, 100);
 
@@ -245,7 +250,7 @@ public partial class MainWindow : Window
             settings.AlertedWindows.Add(id); changed = true;
             if (!settings.LowUsageAlerts) continue;
             string reset = window.ResetsAt is long at ? $" · resets in {UsageFormatting.Short(at, now)} ({DateTimeOffset.FromUnixTimeSeconds(at).ToLocalTime():HH:mm})" : "";
-            tray.ShowBalloonTip(10_000, $"{service} 5-hour limit is low", $"{left:0}% left{reset}", Forms.ToolTipIcon.Warning);
+            tray.ShowBalloon($"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
             DataStore.Log($"Low usage alert: {service} {window.Key}");
         }
         if (changed) DataStore.Write("settings.json", settings);
@@ -303,15 +308,13 @@ public partial class MainWindow : Window
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
         if (enabled) key.SetValue("AIUsageWidget", '"' + Environment.ProcessPath! + '"'); else key.DeleteValue("AIUsageWidget", false);
         settings.StartAtLogin = enabled; DataStore.Write("settings.json", settings);
-        if (trayStartup is not null) trayStartup.Checked = enabled;
     }
     private void SetAlerts(bool enabled) {
         settings.LowUsageAlerts = enabled; DataStore.Write("settings.json", settings);
-        if (trayAlerts is not null) trayAlerts.Checked = enabled;
     }
     private void Quit() {
         quitting = true; SavePosition(); displayTimer.Stop(); refreshTimer.Stop();
-        tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose();
+        tray.Dispose();
         Close(); System.Windows.Application.Current.Shutdown();
     }
 }
