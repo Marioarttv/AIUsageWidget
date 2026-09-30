@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         model.onWindowSettings = { [weak self] in self?.applyWindowSettings() }
         model.onUpdate = { [weak self] in self?.updatePresentation() }
         model.onShow = { [weak self] in self?.reposition() }
+        model.panelCovered = { [weak self] in self?.panelCovered() ?? false }
         model.notifications.onOpen = { [weak self] in self?.showPopover() }
         model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.updatePresentation() }
@@ -132,6 +133,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
     @objc private func screensChanged() { clampToDisplay() }
+    /// Whether one visible window above the panel contains it entirely. Uses window bounds only.
+    private func panelCovered() -> Bool {
+        guard panel.isVisible,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return false }
+        func bounds(_ window: [String: Any]) -> CGRect? {
+            (window[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) }
+        }
+        // The list runs front to back, so only windows before the panel are above it.
+        guard let index = windows.firstIndex(where: { ($0[kCGWindowNumber as String] as? Int) == panel.windowNumber }),
+              let own = bounds(windows[index]) else { return false }
+        return windows[..<index].contains { window in
+            let layer = window[kCGWindowLayer as String] as? Int ?? -1
+            let alpha = window[kCGWindowAlpha as String] as? Double ?? 0
+            return layer >= 0 && layer < Int(CGWindowLevelForKey(.mainMenuWindow)) && alpha > 0.5
+                && bounds(window)?.contains(own) == true
+        }
+    }
     private func reposition() { model.panelVisible = true; positionOnCurrentDisplay(); applyWindowSettings() }
 
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
