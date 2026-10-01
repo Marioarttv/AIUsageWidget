@@ -18,7 +18,8 @@ The build uses an existing Apple Development signing identity when available, wi
 - **Pin** switches to a floating panel above normal windows. Full-screen behavior depends on the active Space and macOS; system/security surfaces retain their own ordering.
 - **Drag the AI USAGE title** to reposition the panel. The position and display mode persist. Disconnecting a display brings an offscreen panel back onto an available display.
 - **The Claude and ChatGPT marks in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
-- **⋯** contains show/hide, reposition, launch at login, both alert toggles, a test notification, notification settings, and Claude connection access.
+- **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, and Claude connection access.
+- **Refresh While Visible** (1–30 minutes, default 3) sets how often readings refresh while the panel or menu-bar view is on screen; the panel footer shows it. **Refresh While Hidden** (5–60 minutes, default 10) applies while the panel is hidden or fully covered; it is never shorter than the visible interval. Intervals under three minutes poll Claude's rate-limited usage endpoint more often and are more likely to meet its backoff.
 - **↻** refreshes manually. Requests still respect the provider's minimum interval and rate-limit backoff.
 - Hover over a reset time for the exact local date and time. Expired windows show “awaiting update” instead of inventing a full allowance. Failed readings retain visibly dimmed last-known data with an explanation.
 
@@ -35,7 +36,7 @@ Reset messages for multiple windows on the same provider are grouped when detect
 
 Small changes in a provider's reported reset timestamp are treated as jitter within the same window, so they do not duplicate low-allowance alerts or imply a new reset.
 
-Detection happens at the next successful refresh while the Mac is awake: roughly every three minutes while the panel or menu-bar view is on screen, and every ten minutes while the panel is hidden or fully covered by other windows. Opening the menu-bar view catches up immediately; uncovering the panel catches up within a minute. The app also schedules a check near known reset times, subject to provider throttling. No alerts can be detected while the app is quit, the Mac is asleep, or providers are inaccessible. A wake triggers a refresh. The app does not keep the Mac awake.
+Detection happens at the next successful refresh while the Mac is awake: at the **Refresh While Visible** interval (default three minutes) while the panel or menu-bar view is on screen, and at the **Refresh While Hidden** interval (default ten minutes) while the panel is hidden or fully covered by other windows. Opening the menu-bar view catches up immediately; uncovering the panel catches up within a minute. The app also schedules a check near known reset times, subject to provider throttling. No alerts can be detected while the app is quit, the Mac is asleep, or providers are inaccessible. A wake triggers a refresh. The app does not keep the Mac awake.
 
 ## Usage connections and privacy
 
@@ -51,7 +52,7 @@ Interface documentation: [Codex app server](https://learn.chatgpt.com/docs/app-s
 
 ## Performance
 
-The app links only Apple frameworks and the system Swift runtime. There is no Electron, web view, Node service, polling shell, or persistent Codex helper. Network work runs off the main thread. Idle display updates happen once per minute and stop when both views are hidden. Refreshes slow to every ten minutes while nothing is watched (the panel counts as covered when one window above it contains it entirely; this check reads window bounds only), and the Claude sign-in is read from the Keychain only when needed, not on every refresh. The menu-bar image is redrawn only when a reading changes. Refresh timers use tolerance for macOS timer coalescing and pause on screen/system sleep. The interface uses solid fills, without continuous animations or blur effects. Launch at login is optional.
+The app links only Apple frameworks and the system Swift runtime. There is no Electron, web view, Node service, polling shell, or persistent Codex helper. Network work runs off the main thread. Idle display updates happen once per minute and stop when both views are hidden. Refreshes slow to the hidden interval (default ten minutes) while nothing is watched (the panel counts as covered when one window above it contains it entirely; this check reads window bounds only), and the Claude sign-in is read from the Keychain only when needed, not on every refresh. The menu-bar image is redrawn only when a reading changes. Refresh timers use tolerance for macOS timer coalescing and pause on screen/system sleep. The interface uses solid fills, without continuous animations or blur effects. Launch at login is optional.
 
 ## Build and verify
 

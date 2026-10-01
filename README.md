@@ -21,7 +21,7 @@ Both notification types are on by default:
 - A warning once per five-hour window when **less than 10% remains**.
 - A notification after a fresh provider reading **confirms a usage reset**, including weekly windows. Reaching a countdown alone does not imply a reset.
 
-The app normally refreshes every three minutes, respects provider backoff, and pauses timers during sleep. Countdown text updates once a minute while a panel is visible. Notifications are detected on refresh and can be delayed by sleep, offline access, provider limits, or macOS notification settings.
+The app refreshes every three minutes by default (choose **⋯ → Refresh While Visible / Refresh While Hidden** to change it), respects provider backoff, and pauses timers during sleep. Countdown text updates once a minute while a panel is visible. Notifications are detected on refresh and can be delayed by sleep, offline access, provider limits, or macOS notification settings.
 
 See [the Mac guide](docs/MACOS.md) for build checks, credentials, performance, and removal.
 
