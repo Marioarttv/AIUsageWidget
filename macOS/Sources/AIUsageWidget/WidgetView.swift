@@ -31,6 +31,12 @@ struct WidgetView: View {
                     Button("Reposition on This Display") { model.onShow?() }
                     Divider()
                     Toggle("Launch at Login", isOn: Binding(get: { model.loginEnabled }, set: { model.setLaunchAtLogin($0) }))
+                    Picker("Refresh While Visible", selection: $model.watchedInterval) {
+                        ForEach(RefreshInterval.watchedChoices, id: \.self) { Text("Every " + RefreshInterval.label($0)).tag($0) }
+                    }
+                    Picker("Refresh While Hidden", selection: $model.unwatchedInterval) {
+                        ForEach(RefreshInterval.unwatchedChoices, id: \.self) { Text("Every " + RefreshInterval.label($0)).tag($0) }
+                    }
                     Toggle("Alert Below 10% (5-hour Windows)", isOn: $model.lowAlerts)
                     Toggle("Notify After Usage Resets", isOn: $model.resetAlerts)
                     Button("Send Test Notification") { model.testNotification() }
@@ -48,14 +54,15 @@ struct WidgetView: View {
 
             ForEach(ProviderID.allCases) { provider in
                 if provider == .codex { Divider().overlay(Color.white.opacity(0.05)) }
-                ProviderView(provider: provider, state: model.services[provider] ?? ServiceState(), now: model.now)
+                ProviderView(provider: provider, state: model.services[provider] ?? ServiceState(), now: model.now,
+                             staleAfter: model.staleAfter)
             }
             HStack(spacing: 5) {
                 Image(systemName: model.topmost ? "pin.fill" : "desktopcomputer")
                 Text(model.topmost ? "Always on top" : "On desktop")
                 Spacer()
                 if model.refreshing { Text("Refreshing…") }
-                else { Text("Auto · 3 min") }
+                else { Text("Auto · " + RefreshInterval.label(model.watchedInterval)) }
             }.font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
             if let message = model.message {
                 Button { model.message = nil } label: {
@@ -77,9 +84,10 @@ private struct ProviderView: View {
     let provider: ProviderID
     let state: ServiceState
     let now: Date
+    let staleAfter: TimeInterval
     private var accent: Color { provider == .claude ? Color(red: 0.91, green: 0.58, blue: 0.43) : Color(red: 0.37, green: 0.81, blue: 0.77) }
     private var primary: UsageWindow? { state.snapshot?.primary }
-    private var stale: Bool { state.stale(at: now) }
+    private var stale: Bool { state.stale(at: now, after: staleAfter) }
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {

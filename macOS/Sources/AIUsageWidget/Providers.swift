@@ -14,8 +14,8 @@ enum ProviderError: Error { case unavailable, timedOut, invalidResponse, authent
 
 actor CodexProvider {
     private var lastAttempt = Date.distantPast
-    func refresh(manual: Bool = false) async -> ProviderResult {
-        guard Date().timeIntervalSince(lastAttempt) >= (manual ? 30 : 150) else { return .skipped }
+    func refresh(minimumGap: TimeInterval = 150) async -> ProviderResult {
+        guard Date().timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
         lastAttempt = Date()
         return await Task.detached(priority: .utility) {
             do {
@@ -134,9 +134,9 @@ actor ClaudeProvider {
     private var credential: ClaudeCredentials.Credential?
     private(set) var keychainReads = 0
 
-    func refresh(manual: Bool = false, allowKeychainUI: Bool = false) async -> ProviderResult {
+    func refresh(minimumGap: TimeInterval = 150, allowKeychainUI: Bool = false) async -> ProviderResult {
         let now = Date()
-        guard now >= backoffUntil, now.timeIntervalSince(lastAttempt) >= (manual ? 30 : 150) else { return .skipped }
+        guard now >= backoffUntil, now.timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
         var fromKeychain = false
         if allowKeychainUI || !(credential?.valid(at: now.addingTimeInterval(60)) ?? false) {
             if let failure = await readCredential(allowUI: allowKeychainUI) { return failure }

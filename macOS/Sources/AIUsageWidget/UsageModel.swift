@@ -7,8 +7,22 @@ import UsageCore
 struct ServiceState {
     var snapshot: UsageSnapshot?
     var status: String?
-    // Longer than the unwatched refresh interval, so a quiet reading isn't dimmed between refreshes.
-    func stale(at now: Date) -> Bool { status != nil || snapshot.map { now.timeIntervalSince($0.updatedAt) > 900 } ?? true }
+    func stale(at now: Date, after limit: TimeInterval) -> Bool {
+        status != nil || snapshot.map { now.timeIntervalSince($0.updatedAt) > limit } ?? true
+    }
+}
+
+/// Refresh cadences offered in settings, in seconds.
+enum RefreshInterval {
+    static let watchedChoices: [TimeInterval] = [60, 120, 180, 300, 600, 900, 1800]
+    static let unwatchedChoices: [TimeInterval] = [300, 600, 900, 1800, 3600]
+    static func stored(_ key: String, choices: [TimeInterval], default value: TimeInterval) -> TimeInterval {
+        let saved = UserDefaults.standard.double(forKey: key)
+        return choices.contains(saved) ? saved : value
+    }
+    static func label(_ seconds: TimeInterval) -> String {
+        seconds >= 3600 ? "\(Int(seconds / 3600)) hr" : "\(Int(seconds / 60)) min"
+    }
 }
 
 private struct RuntimeCache: Codable {
@@ -33,6 +47,18 @@ final class UsageModel: ObservableObject {
     @Published var resetAlerts = UserDefaults.standard.object(forKey: "resetAlerts") as? Bool ?? true {
         didSet { UserDefaults.standard.set(resetAlerts, forKey: "resetAlerts") }
     }
+    /// How often to refresh while the panel or menu-bar view is on screen.
+    @Published var watchedInterval = RefreshInterval.stored("watchedInterval", choices: RefreshInterval.watchedChoices, default: 180) {
+        didSet { UserDefaults.standard.set(watchedInterval, forKey: "watchedInterval"); reschedule() }
+    }
+    /// How often to refresh, for alerts only, while the panel is hidden or covered and the menu-bar view is closed.
+    @Published var unwatchedInterval = RefreshInterval.stored("unwatchedInterval", choices: RefreshInterval.unwatchedChoices, default: 600) {
+        didSet { UserDefaults.standard.set(unwatchedInterval, forKey: "unwatchedInterval"); reschedule() }
+    }
+    /// Never refresh more often unwatched than watched.
+    private var effectiveUnwatchedInterval: TimeInterval { max(watchedInterval, unwatchedInterval) }
+    /// Longer than the unwatched refresh interval, so a quiet reading isn't dimmed between refreshes.
+    var staleAfter: TimeInterval { max(900, effectiveUnwatchedInterval + 300) }
     @Published var loginEnabled = SMAppService.mainApp.status == .enabled
     @Published var notificationStatus = "Checking notifications…"
     @Published var message: String?
@@ -89,10 +115,12 @@ final class UsageModel: ObservableObject {
         guard !refreshing, !suspended else { return }
         refreshing = true
         refreshTimer?.invalidate()
+        // Automatic refreshes keep some slack below the chosen cadence, but never poll faster than the default allows.
+        let gap: TimeInterval = manual ? 30 : min(150, watchedInterval - 15)
         Task {
             await withTaskGroup(of: (ProviderID, ProviderResult).self) { group in
-                group.addTask { [claude] in (.claude, await claude.refresh(manual: manual, allowKeychainUI: allowKeychainUI)) }
-                group.addTask { [codex] in (.codex, await codex.refresh(manual: manual)) }
+                group.addTask { [claude] in (.claude, await claude.refresh(minimumGap: gap, allowKeychainUI: allowKeychainUI)) }
+                group.addTask { [codex] in (.codex, await codex.refresh(minimumGap: gap)) }
                 for await (provider, result) in group {
                     now = Date()
                     switch result {
@@ -122,9 +150,10 @@ final class UsageModel: ObservableObject {
         guard !suspended else { return }
         let now = Date()
         let nextReset = services.values.flatMap { $0.snapshot?.windows ?? [] }.compactMap(\.resetsAt).filter { $0 > now }.min()
-        // Unwatched, only alerts need readings: check every 10 minutes, still waking for a known reset.
-        let cap: TimeInterval = viewed ? 180 : 600
-        let interval = min(cap, max(30, nextReset.map { $0.timeIntervalSince(now) + 5 } ?? cap))
+        // Unwatched, only alerts need readings: check less often, still waking for a known reset.
+        let due = lastRefresh.addingTimeInterval(viewed ? watchedInterval : effectiveUnwatchedInterval)
+        let wake = nextReset.map { max(now.addingTimeInterval(30), $0.addingTimeInterval(5)) } ?? due
+        let interval = max(1, min(due, wake).timeIntervalSince(now))
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -133,10 +162,16 @@ final class UsageModel: ObservableObject {
         refreshTimer = timer
     }
 
+    /// Applies a changed interval to the pending refresh; one in flight schedules the next itself.
+    private func reschedule() {
+        guard !refreshing, refreshCount > 0 else { return }
+        refreshTimer?.invalidate()
+        scheduleRefresh()
+    }
     private func viewChanged() { updateDisplayTimer(); catchUp() }
     /// Refreshes when the widget comes back into view after a longer unwatched interval.
     private func catchUp() {
-        if refreshCount > 0, Date().timeIntervalSince(lastRefresh) >= 180, viewed { refresh() }
+        if refreshCount > 0, Date().timeIntervalSince(lastRefresh) >= watchedInterval, viewed { refresh() }
     }
     private func updateDisplayTimer() {
         displayTimer?.invalidate(); displayTimer = nil
@@ -194,7 +229,7 @@ final class UsageModel: ObservableObject {
         ProviderID.allCases.map { provider in
             let state = services[provider]
             let value = state?.snapshot?.primary
-            let number = value.flatMap { !($0.expired(at: now)) && state?.stale(at: now) == false ? "\(Int($0.remaining.rounded(.down)))%" : nil } ?? "—"
+            let number = value.flatMap { !($0.expired(at: now)) && state?.stale(at: now, after: staleAfter) == false ? "\(Int($0.remaining.rounded(.down)))%" : nil } ?? "—"
             return (provider, number)
         }
     }
@@ -210,6 +245,7 @@ final class UsageModel: ObservableObject {
             "windowVisible": window.isVisible, "windowLevel": window.level.rawValue,
             "mode": topmost ? "floating" : "desktop", "menuTitle": menuTitle,
             "notifications": notificationStatus, "lowAlerts": lowAlerts, "resetAlerts": resetAlerts,
+            "watchedInterval": Int(watchedInterval), "unwatchedInterval": Int(effectiveUnwatchedInterval),
             "watched": viewed, "nextRefreshIn": Int(refreshTimer.map { $0.isValid ? $0.fireDate.timeIntervalSinceNow : 0 } ?? 0), "claudeKeychainReads": claudeKeychainReads,
             "services": Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { id in
                 (id.rawValue, ["windowCount": services[id]?.snapshot?.windows.count ?? 0,
