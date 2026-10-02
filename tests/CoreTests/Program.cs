@@ -28,4 +28,24 @@ var merged = ClaudeService.Merge(claude, line)!;
 Check(merged.Windows.Count == 3 && merged.Windows[0].UsedPercent == 60 && merged.UpdatedAt == line.UpdatedAt, "A newer status-line reading must replace the matching account window only.");
 Check(ClaudeService.Merge(claude, line with { UpdatedAt = claude.UpdatedAt.AddMinutes(-1) }) == claude, "An older status-line reading must not override the account reading.");
 Check(ClaudeService.Merge(null, line) == line && ClaudeService.Merge(claude, null) == claude, "Either Claude source alone must be shown.");
-Console.WriteLine("Passed: dynamic window labels, multiple buckets, null/zero usage, expired resets, Claude account parsing, and feed merging.");
+var trayState = new UsageSnapshot(now, "test", [
+    new("weekly", "Weekly", 98, now.AddDays(1).ToUnixTimeSeconds(), 10080),
+    new("session", "5-hour session", 32, now.AddHours(2).ToUnixTimeSeconds(), 300)]);
+var trayReading = TrayReading.Create(UsageProvider.Claude, trayState, now);
+Check(trayReading.Number == "68" && trayReading.Tooltip.Contains("5-hour session · 68% remaining") && trayReading.Tooltip.Contains("Resets in 2h"),
+    "Tray must show the shortest window's remaining allowance, not the lowest allowance or time to reset.");
+Check(TrayReading.Create(UsageProvider.Codex, null, now).Number == "—", "Missing tray usage must show a dash.");
+Check(TrayReading.Create(UsageProvider.Codex, trayState with { Windows = [] }, now).Number == "—", "An empty reading must remain unknown.");
+Check(TrayReading.Create(UsageProvider.Codex, trayState, now.AddHours(2)).Number == "—", "An expired session must show a dash, not switch to the weekly allowance.");
+Check(TrayReading.Create(UsageProvider.Codex, trayState with { Windows = [trayState.Windows[0]] }, now).Number == "2", "Weekly-only plans must use their actual shortest window.");
+Check(TrayReading.Create(UsageProvider.Codex, trayState, now).Tooltip.StartsWith("ChatGPT / Codex"), "ChatGPT marks must identify the Codex allowance in their tooltip.");
+foreach (var (used, expected) in new[] { (0.0, "100"), (100.0, "0"), (-4.0, "100"), (105.0, "0"), (32.6, "67"), (double.NaN, "—"), (double.PositiveInfinity, "—") })
+{
+    var state = trayState with { Windows = [new("session", "5-hour session", used, null, 300)] };
+    Check(TrayReading.Create(UsageProvider.Claude, state, now).Number == expected, "Tray must clamp and round percentages like the widget, and reject invalid usage.");
+}
+var durations = trayState with { Windows = [new("unknown", "Unknown", 2, null), new("invalid", "Invalid", 3, null, 0), trayState.Windows[1]] };
+Check(UsageFormatting.Primary(durations)?.Key == "session", "Known, positive durations must precede unknown or invalid durations.");
+Check(TrayReading.Create(UsageProvider.Claude, merged, claude.UpdatedAt).Number == "40", "Tray must use the same merged Claude feed as the widget.");
+TrayTests.Run(args.Contains("--tray-preview"));
+Console.WriteLine("Passed: window labels, multiple buckets, usage edge cases, resets, Claude parsing/merging, tray readings, scaled artwork, native resource cleanup, shell registration, callbacks, Explorer recovery, and tray removal.");

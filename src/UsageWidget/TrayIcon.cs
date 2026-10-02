@@ -3,7 +3,8 @@ using System.Windows.Interop;
 
 namespace UsageWidget;
 
-// Minimal notification-area icon over Shell_NotifyIcon, so the widget does not load the Windows Forms runtime.
+// Windows gives each notification icon a square slot. A mark + number pair keeps both readable.
+// One hidden window owns all four entries; no Windows Forms runtime or extra refresh loop is needed.
 public sealed class TrayIcon : IDisposable
 {
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -17,63 +18,150 @@ public sealed class TrayIcon : IDisposable
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string InfoTitle;
         public int InfoFlags; public Guid Item; public IntPtr BalloonIcon;
     }
+    private sealed class Entry(UsageProvider provider, bool number, int id, Guid guid)
+    {
+        internal readonly UsageProvider Provider = provider;
+        internal readonly bool IsNumber = number;
+        internal NOTIFYICONDATA Data = new() { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Id = id, Item = guid,
+            CallbackMessage = CallbackMessage, Tip = "", Info = "", InfoTitle = "" };
+        internal TrayIconHandle? Icon;
+        internal string? Number;
+        internal TrayAppearance? Appearance;
+        internal bool Registered;
+    }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIcon(int message, ref NOTIFYICONDATA data);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint ExtractIconEx(string file, int index, IntPtr[]? large, IntPtr[] small, uint count);
-    [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int RegisterWindowMessage(string name);
-    private const int NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_INFO = 0x10;
-    private const int CallbackMessage = 0x8001, WM_LBUTTONDBLCLK = 0x0203, WM_RBUTTONUP = 0x0205, NIN_BALLOONUSERCLICK = 0x0405;
-    private static readonly int TaskbarCreated = RegisterWindowMessage("TaskbarCreated");
+    private const int NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4;
+    private const int NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_INFO = 0x10, NIF_GUID = 0x20, NIF_SHOWTIP = 0x80;
+    internal const int CallbackMessage = 0x8001;
+    internal static readonly int TaskbarCreated = RegisterWindowMessage("TaskbarCreated");
     private readonly HwndSource window;
-    private readonly IntPtr icon;
-    private NOTIFYICONDATA data;
-    public event Action? DoubleClick, BalloonClick, MenuRequested;
+    private readonly Entry[] entries = [
+        new(UsageProvider.Claude, false, 1, new Guid("2e6bac65-0a81-41dd-ac61-d09a0d3890bc")),
+        new(UsageProvider.Claude, true, 2, new Guid("508fed50-bfdf-45f9-b219-5f23214a5e58")),
+        new(UsageProvider.Codex, false, 3, new Guid("c3a3e8e7-4726-4c85-ae61-e1b46230464e")),
+        new(UsageProvider.Codex, true, 4, new Guid("a01b25ac-0a2e-46b4-9031-c86bd4660d66"))
+    ];
+    private bool disposed;
+    private TrayAppearance? appearance;
+    private UsageSnapshot? claude, codex;
+    public event Action? Click, BalloonClick, MenuRequested;
+    internal IntPtr WindowHandle => window.Handle;
 
-    public TrayIcon(string tip)
+    public TrayIcon() : this(null) { }
+
+    // Integration checks use temporary GUIDs so they cannot claim the installed app's persisted tray identities.
+    internal TrayIcon(Guid[]? identities)
     {
-        // A hidden top-level window (not message-only) also receives TaskbarCreated when Explorer restarts.
+        if (identities is not null && identities.Length != entries.Length) throw new ArgumentException("Four tray identities are required.", nameof(identities));
+        // A top-level window also receives TaskbarCreated when Explorer restarts.
         window = new HwndSource(new HwndSourceParameters("AIUsageWidgetTray") { WindowStyle = 0, Width = 0, Height = 0 });
         window.AddHook(Hook);
-        var small = new IntPtr[1];
-        ExtractIconEx(Environment.ProcessPath!, 0, null, small, 1);
-        icon = small[0];
-        data = new NOTIFYICONDATA { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Window = window.Handle, Id = 1, Flags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
-            CallbackMessage = CallbackMessage, Icon = icon, Tip = tip, Info = "", InfoTitle = "" };
-        Shell_NotifyIcon(NIM_ADD, ref data);
+        for (int i = 0; i < entries.Length; i++)
+        {
+            entries[i].Data.Window = window.Handle;
+            if (identities is not null) entries[i].Data.Item = identities[i];
+        }
+        try { Update(null, null, DateTimeOffset.UtcNow); }
+        catch { Dispose(); throw; }
+    }
+
+    public void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now)
+    {
+        if (disposed) return;
+        this.claude = claude; this.codex = codex;
+        appearance ??= TrayAppearance.Read();
+        var claudeReading = TrayReading.Create(UsageProvider.Claude, claude, now);
+        var codexReading = TrayReading.Create(UsageProvider.Codex, codex, now);
+        foreach (var entry in entries)
+        {
+            var reading = entry.Provider == UsageProvider.Claude ? claudeReading : codexReading;
+            string? number = entry.IsNumber ? reading.Number : null;
+            string tip = reading.Tooltip + (entry.IsNumber ? "\nRemaining %" : "");
+            if (tip.Length > 127) tip = tip[..127];
+            bool imageChanged = entry.Icon is null || entry.Number != number || entry.Appearance != appearance;
+            bool tipChanged = entry.Data.Tip != tip;
+            if (imageChanged)
+            {
+                var icon = TrayArtwork.Create(entry.Provider, number, appearance.Value);
+                var previous = entry.Icon;
+                entry.Icon = icon; entry.Data.Icon = icon.DangerousGetHandle();
+                entry.Number = number; entry.Appearance = appearance;
+                previous?.Dispose(); // The shell keeps its own copy of the previous icon.
+            }
+            entry.Data.Tip = tip;
+            if (!entry.Registered) Register(entry);
+            else if (imageChanged || tipChanged)
+            {
+                entry.Data.Flags = NIF_GUID | (imageChanged ? NIF_ICON : 0) | (tipChanged ? NIF_TIP | NIF_SHOWTIP : 0);
+                if (!Shell_NotifyIcon(NIM_MODIFY, ref entry.Data)) { entry.Registered = false; Register(entry); }
+            }
+        }
+    }
+
+    private static void Register(Entry entry)
+    {
+        entry.Data.Flags = NIF_GUID | NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+        entry.Registered = Shell_NotifyIcon(NIM_ADD, ref entry.Data);
+        if (entry.Registered)
+        {
+            entry.Data.Version = 4; // Keyboard selection and context-menu notifications.
+            Shell_NotifyIcon(NIM_SETVERSION, ref entry.Data);
+        }
     }
 
     // Menus opened from the tray only dismiss correctly when their owner is in the foreground.
     public void PrepareMenu() => SetForegroundWindow(window.Handle);
 
-    public void ShowBalloon(string title, string text, bool warning)
+    public void ShowBalloon(UsageProvider provider, string title, string text, bool warning)
     {
-        var info = data;
-        info.Flags = NIF_INFO; info.InfoTitle = title.Length > 63 ? title[..63] : title; info.Info = text.Length > 255 ? text[..255] : text;
-        info.InfoFlags = warning ? 2 : 1; // NIIF_WARNING : NIIF_INFO
+        if (disposed) return;
+        var info = entries.First(e => e.Provider == provider && !e.IsNumber).Data;
+        info.Flags = NIF_GUID | NIF_INFO; info.InfoTitle = title.Length > 63 ? title[..63] : title;
+        info.Info = text.Length > 255 ? text[..255] : text; info.InfoFlags = warning ? 2 : 1;
         Shell_NotifyIcon(NIM_MODIFY, ref info);
     }
 
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (disposed) return IntPtr.Zero;
         if (message == CallbackMessage)
         {
             switch ((int)(lParam.ToInt64() & 0xFFFF))
             {
-                case WM_LBUTTONDBLCLK: DoubleClick?.Invoke(); break;
-                case WM_RBUTTONUP: MenuRequested?.Invoke(); break;
-                case NIN_BALLOONUSERCLICK: BalloonClick?.Invoke(); break;
+                case 0x0400: // NIN_SELECT
+                case 0x0401: Click?.Invoke(); break; // NIN_KEYSELECT
+                case 0x007B: MenuRequested?.Invoke(); break; // WM_CONTEXTMENU
+                case 0x0405: BalloonClick?.Invoke(); break;
             }
             handled = true;
         }
-        else if (message == TaskbarCreated) Shell_NotifyIcon(NIM_ADD, ref data);
+        else if (message == TaskbarCreated)
+        {
+            foreach (var entry in entries) entry.Registered = false;
+            appearance = null;
+            Update(claude, codex, DateTimeOffset.UtcNow);
+        }
+        else if (message is 0x001A or 0x007E or 0x02E0 or 0x031A) // Settings, display, DPI, theme.
+        {
+            appearance = null;
+            Update(claude, codex, DateTimeOffset.UtcNow);
+        }
         return IntPtr.Zero;
     }
 
     public void Dispose()
     {
-        Shell_NotifyIcon(NIM_DELETE, ref data);
-        if (icon != IntPtr.Zero) DestroyIcon(icon);
+        if (disposed) return;
+        disposed = true;
+        foreach (var entry in entries)
+        {
+            entry.Data.Flags = NIF_GUID;
+            Shell_NotifyIcon(NIM_DELETE, ref entry.Data);
+            entry.Icon?.Dispose();
+        }
+        window.RemoveHook(Hook);
         window.Dispose();
     }
 }

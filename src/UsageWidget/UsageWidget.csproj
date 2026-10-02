@@ -16,6 +16,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CoreTests" />
     <Resource Include="../../assets/widget.ico" Link="Assets/widget.ico" />
     <Content Include="../../scripts/claude-bridge.cjs" Link="claude-bridge.cjs" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../scripts/setup-claude.cjs" Link="setup-claude.cjs" CopyToPublishDirectory="PreserveNewest" />

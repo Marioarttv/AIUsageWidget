@@ -34,8 +34,8 @@ public partial class MainWindow : Window
         else if (settings.Mode != "topmost") settings.Mode = "desktop";
         Left = SystemParameters.WorkArea.Right - Width - 28;
         Top = SystemParameters.WorkArea.Top + 60;
-        tray = new TrayIcon("AI Usage Widget");
-        tray.DoubleClick += Reveal;
+        tray = new TrayIcon();
+        tray.Click += Reveal;
         tray.BalloonClick += Reveal;
         tray.MenuRequested += () => { tray.PrepareMenu(); var menu = BuildMenu(true); menu.Placement = PlacementMode.MousePoint; menu.IsOpen = true; };
         Loaded += async (_, _) => {
@@ -107,6 +107,7 @@ public partial class MainWindow : Window
         var claudeAccount = Snapshot(ClaudeService.SnapshotName);
         var claudeState = ClaudeService.Merge(claudeAccount, Snapshot("claude.json"));
         var codexState = Snapshot("codex.json");
+        tray.Update(claudeState, codexState, now);
         DrawService(ClaudePanel, "Claude", "#D99776", claude.Plan ?? claudeAccount?.Plan, claudeState, claude.Refreshing, claude.Status, now,
             "Claude subscription usage across claude.ai, Claude Code, and SDK tools, read with your Claude Code sign-in.");
         DrawService(CodexPanel, "Codex", "#87BBA7", codexState?.Plan, codexState, codex.Refreshing, codex.Status, now,
@@ -163,8 +164,8 @@ public partial class MainWindow : Window
         if (drawn.TryGetValue(panel, out var last) && last == key) return;
         drawn[panel] = key;
         panel.Children.Clear();
-        var primary = windows.OrderBy(w => w.WindowMinutes ?? int.MaxValue).FirstOrDefault();
-        double? remaining = primary is null || UsageFormatting.Expired(primary, now) ? null : Math.Clamp(100 - primary.UsedPercent, 0, 100);
+        var primary = UsageFormatting.Primary(state);
+        double? remaining = UsageFormatting.Remaining(primary, now);
 
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition()); head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -250,7 +251,8 @@ public partial class MainWindow : Window
             settings.AlertedWindows.Add(id); changed = true;
             if (!settings.LowUsageAlerts) continue;
             string reset = window.ResetsAt is long at ? $" · resets in {UsageFormatting.Short(at, now)} ({DateTimeOffset.FromUnixTimeSeconds(at).ToLocalTime():HH:mm})" : "";
-            tray.ShowBalloon($"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
+            tray.ShowBalloon(service == "Claude" ? UsageProvider.Claude : UsageProvider.Codex,
+                $"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
             DataStore.Log($"Low usage alert: {service} {window.Key}");
         }
         if (changed) DataStore.Write("settings.json", settings);

@@ -47,6 +47,12 @@ public static class DataStore
 
 public static class UsageFormatting
 {
+    public static UsageWindow? Primary(UsageSnapshot? snapshot) => snapshot?.Windows
+        .OrderBy(w => w.WindowMinutes is > 0 ? w.WindowMinutes.Value : int.MaxValue).FirstOrDefault();
+    public static double? Remaining(UsageWindow? window, DateTimeOffset now) =>
+        window is null || Expired(window, now) || !double.IsFinite(window.UsedPercent)
+            ? null : Math.Clamp(100 - window.UsedPercent, 0, 100);
+
     public static string WindowLabel(int? minutes, string fallback) => minutes switch {
         10080 => "Weekly", 300 => "5-hour session", 1440 => "Daily", 60 => "Hourly",
         > 0 when minutes % 1440 == 0 => $"{minutes / 1440}-day window",
