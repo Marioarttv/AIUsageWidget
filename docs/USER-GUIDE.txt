@@ -22,20 +22,25 @@ The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
 When a 5-hour limit drops below 10% remaining, a Windows notification is
 shown once for that window. Turn this off with Low 5-hour limit alerts.
 Start with Windows can be enabled in either menu; it is initially off.
-Click any tray logo or number to show the widget above other windows.
+Click the taskbar strip or the app's tray icon to show the widget.
 
 Usage beside the clock
 ----------------------
-The tray shows the Claude and ChatGPT logos, each with a matching-color
+The taskbar strip shows the Claude and ChatGPT logos, each with a matching-color
 number: the PERCENTAGE REMAINING in the shortest window (usually five
 hours). The ChatGPT logo shows your Codex allowance. A dash means that a
 reading is missing or the reset has passed and a fresh reading is needed.
 Readings continue updating when you hide the desktop widget.
 
-Windows gives each tray entry a square slot, so the logos and numbers use
-four entries. If hidden, open the ^ arrow beside the clock and drag all four
-onto the taskbar. Arrange each number next to its matching logo. Windows
-controls the visibility and order and remembers your choices for the app.
+Both logos and percentages stay together in one compact strip just left of
+the primary taskbar's notification area. The strip is an app-owned overlay;
+it does not reserve taskbar space. If buttons fill that space or the layout
+cannot be checked, it moves just outside the taskbar. It follows display
+scaling, hides with an auto-hidden taskbar and during fullscreen apps, and
+returns when the taskbar is available again. Vertical taskbars show it beside
+the tray. Use Show taskbar usage strip in the menu to hide or restore it.
+One normal app icon remains in the tray for alerts and access to settings;
+the four separate logo/number entries are no longer used.
 Hover over a logo or number for the provider, window, remaining percentage,
 and reset countdown. Right-click any of them for the usual widget menu.
 

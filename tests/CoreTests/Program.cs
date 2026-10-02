@@ -1,6 +1,8 @@
 using System.Text.Json;
 using UsageWidget;
 
+if (args.Contains("--inspect-taskbar")) { TrayTests.InspectTaskbar(); return; }
+
 static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 static UsageSnapshot Parse(string json) { using var doc = JsonDocument.Parse(json); return CodexService.Parse(doc.RootElement, DateTimeOffset.Parse("2026-09-30T12:00:00Z")); }
 
@@ -48,4 +50,4 @@ var durations = trayState with { Windows = [new("unknown", "Unknown", 2, null), 
 Check(UsageFormatting.Primary(durations)?.Key == "session", "Known, positive durations must precede unknown or invalid durations.");
 Check(TrayReading.Create(UsageProvider.Claude, merged, claude.UpdatedAt).Number == "40", "Tray must use the same merged Claude feed as the widget.");
 TrayTests.Run(args.Contains("--tray-preview"));
-Console.WriteLine("Passed: window labels, multiple buckets, usage edge cases, resets, Claude parsing/merging, tray readings, scaled artwork, native resource cleanup, shell registration, callbacks, Explorer recovery, and tray removal.");
+Console.WriteLine("Passed: usage parsing/merging and edge cases, native tray lifecycle, taskbar strip readings/clicks/layout, DPI scaling, collision fallback, fullscreen/auto-hide placement, and native resource cleanup.");
