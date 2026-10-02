@@ -47,7 +47,9 @@ Claude readings work as soon as Claude Code is signed in. Optionally, run `app/C
 - Open **⋯** for **Start with Windows**, **Low 5-hour limit alerts**, **Hide**, and **Quit**.
 - When a 5-hour limit drops below 10% remaining, a Windows notification appears once for that window. Click it to bring the widget forward. Alerts are on by default.
 - Enable **Start with Windows** once to launch the app when signing in after a shutdown or restart.
-- Double-click the tray icon to bring the widget forward.
+- The notification area beside the clock shows the Claude and ChatGPT marks, each with a matching-color number for the **percentage remaining in its shortest quota window** (usually five hours). The ChatGPT mark represents the Codex subscription allowance.
+- Windows uses square tray slots, so each logo and number is a separate entry (four entries in total). If they are hidden, open **^ Show hidden icons** and drag all four onto the taskbar, placing each number beside its matching logo. Windows controls their visibility and order and remembers these choices for the installed app.
+- Hover over either a logo or a number for the provider, window, percentage, and reset countdown. Click any entry to bring the widget forward; right-click for settings. Tray readings keep updating while the widget is hidden.
 
 New installations start in always-on-top mode so the widget is easy to find. Use the taskbar button, the tray icon, or `SHOW-WIDGET.cmd` to bring it forward from desktop mode.
 
@@ -65,7 +67,7 @@ Programs started by a packaged app, such as the Codex desktop app, have their `%
 
 Local snapshots, settings, a short log, and the original Claude configuration backup are stored under `%LOCALAPPDATA%\AIUsageWidget`, outside the repository.
 
-The app, taskbar, and tray share the generated artwork in `assets/widget.ico`. The PNG master and generation prompt are kept in `assets/`. The Windows icon contains multiple sizes for different display scales.
+The app and taskbar button use the generated artwork in `assets/widget.ico`. The PNG master and generation prompt are kept in `assets/`. The notification area uses the same Claude and ChatGPT vector marks as the Mac menu bar, alongside dynamically rendered percentages. These adapt to taskbar scaling, light/dark themes, and Windows high-contrast colors.
 
 To recreate the ICO from the generated PNG master, run `python scripts/create-icon.py` with Pillow installed. Python is only needed for asset packaging, not to build or run the widget.
 
@@ -78,6 +80,8 @@ dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
 ```
 
 The publish command includes the Claude bridge, setup scripts, launchers, and user guide. Build output and local usage data are not committed.
+
+Core checks include native tray registration, clicks and keyboard callbacks, recovery after Explorer recreates the tray, cleanup, and artwork rendering at 100–300% scale. These shell checks require an interactive Windows desktop. Add `-- --tray-preview` to the CoreTests command to save a light/dark artwork preview beside the test executable.
 
 To run a live Codex and Claude connection check without opening the widget:
 
