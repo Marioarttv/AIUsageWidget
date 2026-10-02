@@ -14,7 +14,7 @@ internal static class TrayTests
     {
         Exception? failure = null;
         var thread = new Thread(() => {
-            try { CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); }
+            try { CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); CheckStripPopupOrder(); }
             catch (Exception ex) { failure = ex; }
         });
         thread.SetApartmentState(ApartmentState.STA);
@@ -162,6 +162,65 @@ internal static class TrayTests
         Console.WriteLine($"Taskbar: {state.Bounds}; monitor: {state.Monitor}; tray: {state.Tray}; scale: {state.Scale}; visible: {state.Visible}; fullscreen: {state.Fullscreen}");
         Console.WriteLine("Buttons: " + (buttons is null ? "unknown" : string.Join("; ", buttons)));
         Console.WriteLine("Strip: " + TaskbarPlacement.Calculate(state, buttons));
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    private static bool IsAbove(IntPtr higher, IntPtr lower)
+    {
+        for (var window = GetWindow(lower, 3); window != IntPtr.Zero; window = GetWindow(window, 3)) // GW_HWNDPREV
+            if (window == higher) return true;
+        return false;
+    }
+
+    private static void Pump(TimeSpan duration)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = duration };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
+    private static void CheckStripPopupOrder()
+    {
+        using var strip = new TaskbarStrip(() => { }, () => new System.Windows.Controls.ContextMenu());
+        strip.Update(null, null, DateTimeOffset.UtcNow);
+        strip.SetEnabled(true);
+        Pump(TimeSpan.FromSeconds(1)); // Let Explorer's initial geometry query settle.
+        if (!strip.IsVisible) throw new Exception("Popup stacking check needs a visible taskbar, outside fullscreen mode.");
+        var row = (System.Windows.Controls.StackPanel)((System.Windows.Controls.Border)strip.Content).Child;
+        var button = (System.Windows.Controls.Button)row.Children[0];
+        var tooltip = new System.Windows.Controls.ToolTip {
+            Content = "Claude · 22% remaining", PlacementTarget = button,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top, StaysOpen = true
+        };
+        button.ToolTip = tooltip;
+        tooltip.IsOpen = true;
+        try
+        {
+            Pump(TimeSpan.FromMilliseconds(100));
+            var popup = ((System.Windows.Interop.HwndSource)PresentationSource.FromVisual(tooltip)).Handle;
+            var owner = new System.Windows.Interop.WindowInteropHelper(strip).Handle;
+            if (!IsAbove(popup, owner)) throw new Exception("Tooltip did not initially open above the strip.");
+            Pump(TimeSpan.FromSeconds(4)); // Cross several placement ticks and an asynchronous button refresh.
+            if (!tooltip.IsOpen || !IsAbove(popup, owner))
+                throw new Exception("Periodic taskbar positioning raised the strip above its open tooltip.");
+        }
+        finally { tooltip.IsOpen = false; }
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = button };
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Show widget" });
+        menu.IsOpen = true;
+        try
+        {
+            Pump(TimeSpan.FromMilliseconds(100));
+            var popup = ((System.Windows.Interop.HwndSource)PresentationSource.FromVisual(menu)).Handle;
+            var owner = new System.Windows.Interop.WindowInteropHelper(strip).Handle;
+            Pump(TimeSpan.FromSeconds(4));
+            if (!menu.IsOpen || !IsAbove(popup, owner))
+                throw new Exception("Periodic taskbar positioning raised the strip above its open context menu.");
+        }
+        finally { menu.IsOpen = false; strip.SetEnabled(false); }
     }
 
     private static void CheckArtwork(bool preview)

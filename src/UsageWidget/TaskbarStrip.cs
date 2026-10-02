@@ -117,13 +117,14 @@ internal sealed class TaskbarStrip : Window, IDisposable
         if (!probing && DateTimeOffset.UtcNow - buttonsReadAt >= TimeSpan.FromSeconds(3)) _ = ProbeButtons(state);
         if (appearance is null) ApplyAppearance(TrayAppearance.Read());
         bool changed = lastPlacement != placement || !IsVisible;
+        if (!changed) return;
         if (!IsVisible) Show();
         var rect = placement.Value;
         var handle = new WindowInteropHelper(this).Handle;
-        // Keep above Explorer without taking focus from the user's current app.
-        SetWindowPos(handle, new IntPtr(-1), (int)Math.Round(rect.X), (int)Math.Round(rect.Y), (int)Math.Round(rect.Width), (int)Math.Round(rect.Height), 0x0010);
+        // Topmost is set on the window. Moving it must preserve the order of its tooltips and menus.
+        SetWindowPos(handle, IntPtr.Zero, (int)Math.Round(rect.X), (int)Math.Round(rect.Y), (int)Math.Round(rect.Width), (int)Math.Round(rect.Height), 0x0010 | 0x0004); // NOACTIVATE | NOZORDER
         lastPlacement = rect;
-        if (changed) PlacementChanged?.Invoke();
+        PlacementChanged?.Invoke();
     }
 
     private async Task ProbeButtons(TaskbarState state)

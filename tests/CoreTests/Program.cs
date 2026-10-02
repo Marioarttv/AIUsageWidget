@@ -50,4 +50,4 @@ var durations = trayState with { Windows = [new("unknown", "Unknown", 2, null), 
 Check(UsageFormatting.Primary(durations)?.Key == "session", "Known, positive durations must precede unknown or invalid durations.");
 Check(TrayReading.Create(UsageProvider.Claude, merged, claude.UpdatedAt).Number == "40", "Tray must use the same merged Claude feed as the widget.");
 TrayTests.Run(args.Contains("--tray-preview"));
-Console.WriteLine("Passed: usage parsing/merging and edge cases, native tray lifecycle, taskbar strip readings/clicks/layout, DPI scaling, collision fallback, fullscreen/auto-hide placement, and native resource cleanup.");
+Console.WriteLine("Passed: usage parsing/merging and edge cases, native tray lifecycle, taskbar strip readings/clicks/layout, tooltip/menu stacking across timer ticks, DPI scaling, collision fallback, fullscreen/auto-hide placement, and native resource cleanup.");
