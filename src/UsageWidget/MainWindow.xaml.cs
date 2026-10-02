@@ -129,13 +129,15 @@ public partial class MainWindow : Window
         var codexState = Snapshot("codex.json");
         tray.Update(claudeState, codexState, now);
         taskbarStrip.Update(claudeState, codexState, now);
+        CheckAlerts("Claude", claudeState, now);
+        CheckAlerts("Codex", codexState, now);
+        CheckResets(claudeAccount, claudeLine, codexState, now);
+        // Hidden/minimized cards need no layout work; readings and notifications above stay active.
+        if (!IsVisible || WindowState == WindowState.Minimized) return;
         DrawService(ClaudePanel, "Claude", "#D99776", claude.Plan ?? claudeAccount?.Plan, claudeState, claude.Refreshing, claude.Status, now,
             "Claude subscription usage across claude.ai, Claude Code, and SDK tools, read with your Claude Code sign-in.");
         DrawService(CodexPanel, "Codex", "#87BBA7", codexState?.Plan, codexState, codex.Refreshing, codex.Status, now,
             "Codex subscription usage from the Codex CLI.");
-        CheckAlerts("Claude", claudeState, now);
-        CheckAlerts("Codex", codexState, now);
-        CheckResets(claudeAccount, claudeLine, codexState, now);
         bool pinned = settings.Mode == "topmost";
         // Filled, highlighted pin while always on top; muted crossed-out pin while on the desktop.
         PinButton.Content = pinned ? "\uE841" : "\uE77A";

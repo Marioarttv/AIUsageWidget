@@ -10,12 +10,14 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>../../assets/widget.ico</ApplicationIcon>
     <Version>1.1.0</Version>
-    <!-- Footprint: no background GC thread or PGO instrumentation, and only English resources. -->
+    <!-- Footprint: no background GC or tiered recompilation, and only English resources. -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredCompilation>false</TieredCompilation>
     <TieredPGO>false</TieredPGO>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
     <InternalsVisibleTo Include="CoreTests" />
     <Resource Include="../../assets/widget.ico" Link="Assets/widget.ico" />
     <Content Include="../../scripts/claude-bridge.cjs" Link="claude-bridge.cjs" CopyToPublishDirectory="PreserveNewest" />
