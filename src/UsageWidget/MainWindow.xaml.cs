@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly CodexService codex = new();
     private readonly ClaudeService claude = new();
     private readonly WidgetSettings settings = DataStore.Read<WidgetSettings>("settings.json") ?? new();
+    private readonly ResetAlertLedger resetAlerts = DataStore.Read<ResetAlertLedger>("reset-alerts.json") ?? new();
     private readonly DispatcherTimer displayTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromMinutes(3) };
     private readonly TrayIcon tray;
@@ -84,6 +85,11 @@ public partial class MainWindow : Window
         Add("On desktop (below other windows)", (_, _) => SetMode("desktop"), true, settings.Mode == "desktop");
         Add("Start with Windows", (_, _) => SetStartup(!StartupEnabled()), true, StartupEnabled());
         Add("Low 5-hour limit alerts", (_, _) => SetAlerts(!settings.LowUsageAlerts), true, settings.LowUsageAlerts);
+        Add("Reset notifications", (_, _) => {
+            settings.ResetNotifications = !settings.ResetNotifications;
+            DataStore.Write("settings.json", settings);
+            if (resetAlerts.Prune(settings.ResetNotifications, DateTimeOffset.UtcNow)) DataStore.Write("reset-alerts.json", resetAlerts);
+        }, true, settings.ResetNotifications);
         Add("Show taskbar usage strip", (_, _) => {
             settings.TaskbarStrip = !settings.TaskbarStrip;
             DataStore.Write("settings.json", settings);
@@ -118,7 +124,8 @@ public partial class MainWindow : Window
     {
         var now = DateTimeOffset.UtcNow;
         var claudeAccount = Snapshot(ClaudeService.SnapshotName);
-        var claudeState = ClaudeService.Merge(claudeAccount, Snapshot("claude.json"));
+        var claudeLine = Snapshot("claude.json");
+        var claudeState = ClaudeService.Merge(claudeAccount, claudeLine);
         var codexState = Snapshot("codex.json");
         tray.Update(claudeState, codexState, now);
         taskbarStrip.Update(claudeState, codexState, now);
@@ -128,6 +135,7 @@ public partial class MainWindow : Window
             "Codex subscription usage from the Codex CLI.");
         CheckAlerts("Claude", claudeState, now);
         CheckAlerts("Codex", codexState, now);
+        CheckResets(claudeAccount, claudeLine, codexState, now);
         bool pinned = settings.Mode == "topmost";
         // Filled, highlighted pin while always on top; muted crossed-out pin while on the desktop.
         PinButton.Content = pinned ? "\uE841" : "\uE77A";
@@ -262,13 +270,27 @@ public partial class MainWindow : Window
             double left = Math.Clamp(100 - window.UsedPercent, 0, 100);
             if (UsageFormatting.Expired(window, now) || left >= 10) { changed |= settings.AlertedWindows.RemoveAll(Same) > 0; continue; }
             if (settings.AlertedWindows.Any(Same)) continue;
-            settings.AlertedWindows.Add(id); changed = true;
-            if (!settings.LowUsageAlerts) continue;
             string reset = window.ResetsAt is long at ? $" · resets in {UsageFormatting.Short(at, now)} ({DateTimeOffset.FromUnixTimeSeconds(at).ToLocalTime():HH:mm})" : "";
-            tray.ShowBalloon($"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
-            DataStore.Log($"Low usage alert: {service} {window.Key}");
+            if (settings.LowUsageAlerts && !tray.TryShowBalloon($"{service} 5-hour limit is low", $"{left:0}% left{reset}", true)) continue;
+            settings.AlertedWindows.Add(id); changed = true;
+            if (settings.LowUsageAlerts) DataStore.Log($"Low usage alert: {service} {window.Key}");
         }
         if (changed) DataStore.Write("settings.json", settings);
+    }
+
+    private void CheckResets(UsageSnapshot? claudeAccount, UsageSnapshot? claudeLine, UsageSnapshot? codexState, DateTimeOffset now)
+    {
+        bool changed = resetAlerts.Prune(settings.ResetNotifications, now);
+        changed |= resetAlerts.ObserveClaude(claudeAccount, claudeLine, settings.ResetNotifications, now);
+        changed |= resetAlerts.Observe(UsageProvider.Codex, codexState, settings.ResetNotifications, now);
+        // Persist observations and pending alerts before asking Windows to display anything.
+        if (changed) DataStore.Write("reset-alerts.json", resetAlerts);
+        if (!settings.ResetNotifications || resetAlerts.Pending.FirstOrDefault() is not ResetAlert alert) return;
+        string provider = alert.Provider == UsageProvider.Claude ? "Claude" : "ChatGPT / Codex";
+        if (!tray.TryShowBalloon($"{provider} usage reset", $"{alert.Label} reset · {alert.Remaining:0}% remaining. Click to open the widget.", false)) return;
+        resetAlerts.MarkDelivered(alert);
+        DataStore.Write("reset-alerts.json", resetAlerts);
+        DataStore.Log($"Reset notification: {provider} {alert.Label}");
     }
 
     private void SetMode(string mode)

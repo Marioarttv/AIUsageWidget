@@ -21,6 +21,16 @@ Hover over a reset countdown to see the exact local reset date and time.
 The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
 When a 5-hour limit drops below 10% remaining, a Windows notification is
 shown once for that window. Turn this off with Low 5-hour limit alerts.
+Reset notifications are also enabled by default for Claude and ChatGPT/Codex,
+including weekly and model-specific limits. A fresh reading must confirm a
+reset; the countdown reaching zero alone does not trigger a notification.
+Click the notification to open the widget. Reset history survives restarts.
+Simultaneous notifications wait their turn instead of replacing each other.
+Turn Reset notifications off in the menu to cancel pending reset alerts.
+The first reading establishes a baseline. Resets are detected on the next
+successful refresh, normally within 3 minutes, even when the widget is hidden.
+Sleep, offline access, provider backoff, and Windows notification settings
+can delay or suppress alerts. Queued reset alerts expire after 30 minutes.
 Start with Windows can be enabled in either menu; it is initially off.
 Click the taskbar strip or the app's tray icon to show the widget.
 

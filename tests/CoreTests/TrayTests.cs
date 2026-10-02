@@ -50,7 +50,9 @@ internal static class TrayTests
     private static void CheckTrayLifecycle()
     {
         Guid[] ids = [Guid.NewGuid()];
-        using (var tray = new TrayIcon(ids[0]))
+        int submissions = 0;
+        bool accept = false;
+        using (var tray = new TrayIcon(ids[0], () => { submissions++; return accept; }))
         {
             if (!ids.All(Registered)) throw new Exception("Windows did not register the fallback tray entry.");
             int clicks = 0, menus = 0, balloons = 0;
@@ -61,6 +63,16 @@ internal static class TrayTests
             foreach (int message in new[] { 0x0400, 0x0401, 0x007B, 0x0405 })
                 SendMessage(tray.WindowHandle, TrayIcon.CallbackMessage, IntPtr.Zero, new IntPtr((id << 16) | message));
             if (clicks != 2 || menus != 1 || balloons != 1) throw new Exception("Tray mouse, keyboard, context-menu, or balloon callbacks failed.");
+            if (tray.TryShowBalloon("Test", "Rejected", false)) throw new Exception("Rejected notifications must remain pending.");
+            accept = true;
+            if (!tray.TryShowBalloon("Test", "Accepted", false) || tray.TryShowBalloon("Test", "Wait", true) || submissions != 2)
+                throw new Exception("An open notification must prevent a second notification from replacing it.");
+            foreach (int completed in new[] { 0x0403, 0x0404, 0x0405 })
+            {
+                SendMessage(tray.WindowHandle, TrayIcon.CallbackMessage, IntPtr.Zero, new IntPtr((1 << 16) | completed));
+                if (!tray.TryShowBalloon("Test", "Next pending notification", false))
+                    throw new Exception("Closing a notification must allow the next one to be submitted.");
+            }
 
             var now = DateTimeOffset.UtcNow;
             for (int used = 0; used <= 100; used++)
