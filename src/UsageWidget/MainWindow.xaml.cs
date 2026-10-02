@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer displayTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromMinutes(3) };
     private readonly TrayIcon tray;
+    private readonly TaskbarStrip taskbarStrip;
     private readonly Dictionary<string, (DateTime Written, UsageSnapshot? Value)> snapshots = new();
     private readonly Dictionary<Panel, string> drawn = new();
     private DateTimeOffset lastRefresh = DateTimeOffset.MinValue;
@@ -38,11 +39,18 @@ public partial class MainWindow : Window
         tray.Click += Reveal;
         tray.BalloonClick += Reveal;
         tray.MenuRequested += () => { tray.PrepareMenu(); var menu = BuildMenu(true); menu.Placement = PlacementMode.MousePoint; menu.IsOpen = true; };
+        taskbarStrip = new TaskbarStrip(Reveal, () => { tray.PrepareMenu(); return BuildMenu(true); });
+        taskbarStrip.PlacementChanged += () => {
+            NativeDesktop.GetWindowRect(NativeDesktop.Handle(taskbarStrip), out var bounds);
+            DataStore.Log($"Taskbar strip: rect={bounds.Left},{bounds.Top},{bounds.Right},{bounds.Bottom}");
+        };
+        tray.EnvironmentChanged += taskbarStrip.RefreshEnvironment;
         Loaded += async (_, _) => {
             DataStore.Log("Widget loaded: mode=" + settings.Mode);
             NativeDesktop.KeepAtBottom(this, () => settings.Mode == "desktop");
             ApplyMode();
             Render();
+            taskbarStrip.SetEnabled(settings.TaskbarStrip);
             if (reveal) _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => { NativeDesktop.CenterOnPrimary(this); SavePosition(); Activate(); }));
             displayTimer.Tick += (_, _) => { ProcessRequest(); Render(); };
             refreshTimer.Tick += async (_, _) => await Refresh(false);
@@ -76,6 +84,11 @@ public partial class MainWindow : Window
         Add("On desktop (below other windows)", (_, _) => SetMode("desktop"), true, settings.Mode == "desktop");
         Add("Start with Windows", (_, _) => SetStartup(!StartupEnabled()), true, StartupEnabled());
         Add("Low 5-hour limit alerts", (_, _) => SetAlerts(!settings.LowUsageAlerts), true, settings.LowUsageAlerts);
+        Add("Show taskbar usage strip", (_, _) => {
+            settings.TaskbarStrip = !settings.TaskbarStrip;
+            DataStore.Write("settings.json", settings);
+            taskbarStrip.SetEnabled(settings.TaskbarStrip);
+        }, true, settings.TaskbarStrip);
         menu.Items.Add(new Separator());
         Add("Refresh now", async (_, _) => await Refresh(true));
         Add("Open Claude usage", (_, _) => OpenUrl("https://claude.ai/settings/usage"));
@@ -108,6 +121,7 @@ public partial class MainWindow : Window
         var claudeState = ClaudeService.Merge(claudeAccount, Snapshot("claude.json"));
         var codexState = Snapshot("codex.json");
         tray.Update(claudeState, codexState, now);
+        taskbarStrip.Update(claudeState, codexState, now);
         DrawService(ClaudePanel, "Claude", "#D99776", claude.Plan ?? claudeAccount?.Plan, claudeState, claude.Refreshing, claude.Status, now,
             "Claude subscription usage across claude.ai, Claude Code, and SDK tools, read with your Claude Code sign-in.");
         DrawService(CodexPanel, "Codex", "#87BBA7", codexState?.Plan, codexState, codex.Refreshing, codex.Status, now,
@@ -251,8 +265,7 @@ public partial class MainWindow : Window
             settings.AlertedWindows.Add(id); changed = true;
             if (!settings.LowUsageAlerts) continue;
             string reset = window.ResetsAt is long at ? $" · resets in {UsageFormatting.Short(at, now)} ({DateTimeOffset.FromUnixTimeSeconds(at).ToLocalTime():HH:mm})" : "";
-            tray.ShowBalloon(service == "Claude" ? UsageProvider.Claude : UsageProvider.Codex,
-                $"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
+            tray.ShowBalloon($"{service} 5-hour limit is low", $"{left:0}% left{reset}", true);
             DataStore.Log($"Low usage alert: {service} {window.Key}");
         }
         if (changed) DataStore.Write("settings.json", settings);
@@ -316,7 +329,7 @@ public partial class MainWindow : Window
     }
     private void Quit() {
         quitting = true; SavePosition(); displayTimer.Stop(); refreshTimer.Stop();
-        tray.Dispose();
+        taskbarStrip.Dispose(); tray.Dispose();
         Close(); System.Windows.Application.Current.Shutdown();
     }
 }
