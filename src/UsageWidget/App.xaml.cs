@@ -27,7 +27,7 @@ public partial class App : System.Windows.Application
             DataStore.Write("request.json", new { action = e.Args.Contains("--desktop") ? "desktop" : e.Args.Contains("--show") ? "reveal" : "show", id = Guid.NewGuid().ToString("N") });
             Shutdown(); return;
         }
-        // A small card needs no GPU; software rendering avoids loading the graphics driver's Direct3D stack (well over 100 MB mapped).
+        // The small widget uses software rendering rather than a hardware rendering target.
         System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         MainWindow = new MainWindow();
         MainWindow.Show();

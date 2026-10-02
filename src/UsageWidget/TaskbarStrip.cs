@@ -19,10 +19,12 @@ internal sealed class TaskbarStrip : Window, IDisposable
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly Func<ContextMenu> buildMenu;
     private readonly Action reveal;
+    private readonly TaskbarLayoutWatch layoutWatch = new();
     private HwndSource? source;
     private TaskbarState? lastState;
     private IReadOnlyList<Rect>? buttons;
     private DateTimeOffset buttonsReadAt;
+    private long buttonsRevision = -1;
     private bool probing, disposed, enabled;
     private TrayAppearance? appearance;
     private Rect? lastPlacement;
@@ -71,7 +73,7 @@ internal sealed class TaskbarStrip : Window, IDisposable
         if (disposed) return;
         enabled = value;
         if (value) { timer.Start(); Reposition(); }
-        else { timer.Stop(); Hide(); }
+        else { timer.Stop(); layoutWatch.Attach(IntPtr.Zero); Hide(); }
     }
 
     internal void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now)
@@ -108,13 +110,18 @@ internal sealed class TaskbarStrip : Window, IDisposable
     {
         if (!enabled || disposed) return;
         var state = TaskbarProbe.Read();
-        if (state is null) { lastState = null; buttons = null; lastPlacement = null; Hide(); return; }
+        if (state is null) { layoutWatch.Attach(IntPtr.Zero); lastState = null; buttons = null; lastPlacement = null; Hide(); return; }
+        layoutWatch.Attach(state.Handle);
         if (lastState?.Handle != state.Handle || lastState.Bounds != state.Bounds || lastState.Tray != state.Tray)
         { buttons = null; buttonsReadAt = DateTimeOffset.MinValue; }
         lastState = state;
         var placement = TaskbarPlacement.Calculate(state, buttons);
         if (placement is null) { lastPlacement = null; Hide(); return; }
-        if (!probing && DateTimeOffset.UtcNow - buttonsReadAt >= TimeSpan.FromSeconds(3)) _ = ProbeButtons(state);
+        var buttonAge = DateTimeOffset.UtcNow - buttonsReadAt;
+        // Debounce layout bursts to one query/second, with a slow fallback for missing shell events.
+        var fallback = TimeSpan.FromSeconds(layoutWatch.Active && buttons is not null ? 30 : 3);
+        if (!probing && (buttonAge >= fallback || (buttonsRevision != layoutWatch.Revision && buttonAge >= TimeSpan.FromSeconds(1))))
+            _ = ProbeButtons(state);
         if (appearance is null) ApplyAppearance(TrayAppearance.Read());
         bool changed = lastPlacement != placement || !IsVisible;
         if (!changed) return;
@@ -130,11 +137,12 @@ internal sealed class TaskbarStrip : Window, IDisposable
     private async Task ProbeButtons(TaskbarState state)
     {
         probing = true;
+        long revision = layoutWatch.Revision;
         try
         {
             var found = await Task.Run(() => TaskbarProbe.ReadButtons(state.Handle));
             if (disposed || lastState?.Handle != state.Handle || lastState.Bounds != state.Bounds || lastState.Tray != state.Tray) return;
-            buttons = found; buttonsReadAt = DateTimeOffset.UtcNow;
+            buttons = found; buttonsReadAt = DateTimeOffset.UtcNow; buttonsRevision = revision;
         }
         finally { probing = false; }
         if (enabled && !disposed) Reposition();
@@ -160,6 +168,7 @@ internal sealed class TaskbarStrip : Window, IDisposable
     {
         if (disposed) return;
         disposed = true; timer.Stop();
+        layoutWatch.Dispose();
         source?.RemoveHook(Hook);
         Close();
     }

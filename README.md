@@ -84,7 +84,7 @@ dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
 
 The publish command includes the Claude bridge, setup scripts, launchers, and user guide. Build output and local usage data are not committed.
 
-Core checks include confirmed reset detection, persistence and deduplication, fresh Claude source timestamps, notification sequencing, native tray lifecycle, and the strip's readings, popup stacking, and placement. Shell checks require an interactive Windows desktop. Add `-- --tray-preview` to save light/dark previews beside the test executable, or `-- --inspect-taskbar` to inspect taskbar geometry and the calculated strip position.
+Core checks include confirmed reset detection, persistence and deduplication, fresh Claude source timestamps, notification sequencing, native tray lifecycle, and the strip's readings, popup stacking, placement, and taskbar layout events. Shell checks require an interactive Windows desktop. Add `-- --tray-preview` to save light/dark previews beside the test executable, or `-- --inspect-taskbar` to inspect taskbar geometry and the calculated strip position.
 
 To run a live Codex and Claude connection check without opening the widget:
 
@@ -92,6 +92,20 @@ To run a live Codex and Claude connection check without opening the widget:
 Start-Process app/AIUsageWidget.exe -ArgumentList '--check' -Wait
 Get-Content "$env:LOCALAPPDATA/AIUsageWidget/check-result.json"
 ```
+
+## Windows: resource use
+
+Taskbar button geometry is cached and refreshed when Explorer reports a layout change, with a 30-second fallback check (three seconds if the event hook or geometry is unavailable). Accessibility queries retrieve cached rectangles without retaining full element references. Hidden or minimized desktop cards skip layout updates; readings, the taskbar strip, and notifications continue normally. The runtime uses [memory-conserving garbage collection](https://learn.microsoft.com/dotnet/core/runtime-config/garbage-collector#conserve-memory) and disables [tiered recompilation](https://learn.microsoft.com/dotnet/core/runtime-config/compilation#tiered-compilation) to limit background compilation and its memory overhead.
+
+To measure a running build over five minutes, including an automatic provider refresh:
+
+```powershell
+./scripts/measure-memory.ps1 > app/memory.json
+```
+
+The report distinguishes private working memory (resident pages owned by the process), total working memory (including shared runtime pages), and private committed memory (including nonresident pages). Compare the same display mode and activity over the same interval. Startup, refreshes, and Windows paging change these numbers; an immediate drop after a restart is not evidence of a lasting saving. The sampler only reads counters and does not trim the process.
+
+A local comparison against `c47051e` on Windows, with the desktop widget and strip enabled, sampled each build 37 times over about 197 seconds after startup, including the next scheduled refresh. Average private working memory decreased from 26.37 to 8.05 MiB (peak 33.77 to 11.46 MiB), and average private committed memory from 63.41 to 46.19 MiB. Widget process CPU time during those intervals decreased from 875 to 141 ms. These are measurements from one machine and short run, not a memory cap or a long-duration guarantee; both builds used the same existing post-refresh memory trim.
 
 ## Windows: remove
 

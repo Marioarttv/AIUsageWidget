@@ -82,10 +82,10 @@ internal static class TaskbarProbe
         uint dpi = GetDpiForWindow(taskbar);
         bool fullscreen = false;
         var foreground = GetForegroundWindow();
-        if (foreground != IntPtr.Zero && foreground != taskbar && GetWindowRect(foreground, out var foregroundRect))
+        if (foreground != IntPtr.Zero && foreground != taskbar && GetWindowRect(foreground, out var foregroundRect) && foregroundRect.Rect.Contains(monitor.Monitor.Rect))
         {
             var name = new StringBuilder(256); GetClassName(foreground, name, name.Capacity);
-            fullscreen = name.ToString() is not ("Progman" or "WorkerW") && foregroundRect.Rect.Contains(monitor.Monitor.Rect);
+            fullscreen = name.ToString() is not ("Progman" or "WorkerW");
         }
         return new(taskbar, bounds.Rect, monitor.Monitor.Rect, trayBounds, (dpi == 0 ? 96 : dpi) / 96.0, IsWindowVisible(taskbar), fullscreen);
     }
@@ -100,7 +100,8 @@ internal static class TaskbarProbe
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
-            var cache = new CacheRequest();
+            // We only need cached rectangles; full element references retain Explorer's provider objects.
+            var cache = new CacheRequest { AutomationElementMode = AutomationElementMode.None };
             cache.Add(AutomationElement.BoundingRectangleProperty);
             cache.Add(AutomationElement.IsOffscreenProperty);
             using (cache.Activate())

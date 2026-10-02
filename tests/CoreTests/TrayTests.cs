@@ -14,7 +14,7 @@ internal static class TrayTests
     {
         Exception? failure = null;
         var thread = new Thread(() => {
-            try { CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); CheckStripPopupOrder(); }
+            try { CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); CheckStripPopupOrder(); CheckTaskbarLayoutWatch(); }
             catch (Exception ex) { failure = ex; }
         });
         thread.SetApartmentState(ApartmentState.STA);
@@ -233,6 +233,35 @@ internal static class TrayTests
                 throw new Exception("Periodic taskbar positioning raised the strip above its open context menu.");
         }
         finally { menu.IsOpen = false; strip.SetEnabled(false); }
+    }
+
+    private static void CheckTaskbarLayoutWatch()
+    {
+        var taskbar = TaskbarProbe.Read() ?? throw new Exception("Taskbar watch check needs Explorer.");
+        using var watch = new TaskbarLayoutWatch();
+        watch.Attach(taskbar.Handle);
+        if (!watch.Active) throw new Exception("Explorer's layout event hook could not be installed.");
+        long revision = watch.Revision;
+        watch.Attach(taskbar.Handle);
+        if (watch.Revision != revision) throw new Exception("Reusing the same taskbar must retain its geometry cache.");
+        var window = new Window { Title = "AI Usage layout check", Width = 100, Height = 60, Left = -10000, Top = -10000, ShowActivated = false };
+        try
+        {
+            window.Show();
+            Pump(TimeSpan.FromSeconds(2));
+            if (watch.Revision == revision) throw new Exception("Adding a taskbar button must invalidate the cached overlap geometry.");
+            revision = watch.Revision;
+            window.Close();
+            Pump(TimeSpan.FromSeconds(2));
+            if (watch.Revision == revision) throw new Exception("Removing a taskbar button must invalidate the cached overlap geometry.");
+        }
+        finally { window.Close(); }
+        watch.Attach(IntPtr.Zero);
+        if (watch.Active) throw new Exception("Hiding the strip must release the Explorer event hook.");
+        watch.Attach(taskbar.Handle);
+        if (!watch.Active) throw new Exception("The layout watch must reconnect after taskbar recreation or re-enabling.");
+        watch.Dispose();
+        if (watch.Active) throw new Exception("Disposing the layout watch must release its native hook.");
     }
 
     private static void CheckArtwork(bool preview)

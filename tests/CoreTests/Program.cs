@@ -51,4 +51,4 @@ Check(UsageFormatting.Primary(durations)?.Key == "session", "Known, positive dur
 Check(TrayReading.Create(UsageProvider.Claude, merged, claude.UpdatedAt).Number == "40", "Tray must use the same merged Claude feed as the widget.");
 ResetAlertTests.Run();
 TrayTests.Run(args.Contains("--tray-preview"));
-Console.WriteLine("Passed: usage parsing/merging, confirmed reset detection and persistence, notification delivery sequencing, native tray lifecycle, taskbar strip layout and popup stacking, DPI scaling, fullscreen/auto-hide placement, and native resource cleanup.");
+Console.WriteLine("Passed: usage parsing/merging, confirmed reset detection and persistence, notification delivery sequencing, native tray lifecycle, taskbar strip layout and popup stacking, Explorer layout events, DPI scaling, fullscreen/auto-hide placement, and native resource cleanup.");
