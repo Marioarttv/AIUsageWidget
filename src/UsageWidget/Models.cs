@@ -12,6 +12,7 @@ public sealed class WidgetSettings
     public int? Y { get; set; }
     public bool StartAtLogin { get; set; }
     public bool LowUsageAlerts { get; set; } = true;
+    public bool ResetNotifications { get; set; } = true;
     public bool TaskbarStrip { get; set; } = true;
     public List<string> AlertedWindows { get; set; } = new();
 }

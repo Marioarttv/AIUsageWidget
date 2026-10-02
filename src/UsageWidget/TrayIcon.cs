@@ -27,8 +27,10 @@ public sealed class TrayIcon : IDisposable
     internal static readonly int TaskbarCreated = RegisterWindowMessage("TaskbarCreated");
     private readonly HwndSource window;
     private readonly TrayIconHandle icon;
+    private readonly Func<bool>? sendBalloon;
     private NOTIFYICONDATA data;
     private bool disposed, registered;
+    private DateTimeOffset balloonBusyUntil;
     public event Action? Click, BalloonClick, MenuRequested, EnvironmentChanged;
     internal IntPtr WindowHandle => window.Handle;
 
@@ -36,8 +38,9 @@ public sealed class TrayIcon : IDisposable
     public TrayIcon() : this(new Guid("a01b25ac-0a2e-46b4-9031-c86bd4660d66")) { }
 
     // Tests use a temporary identity without claiming the installed application's GUID.
-    internal TrayIcon(Guid identity)
+    internal TrayIcon(Guid identity, Func<bool>? sendBalloon = null)
     {
+        this.sendBalloon = sendBalloon;
         var small = new IntPtr[1];
         ExtractIconEx(Environment.ProcessPath!, 0, null, small, 1);
         icon = small[0] != IntPtr.Zero ? new TrayIconHandle(small[0]) : TrayArtwork.Create(UsageProvider.Codex, null, TrayAppearance.Read());
@@ -79,13 +82,17 @@ public sealed class TrayIcon : IDisposable
 
     public void PrepareMenu() => SetForegroundWindow(window.Handle);
 
-    public void ShowBalloon(string title, string text, bool warning)
+    // Keep a second alert pending until Windows closes the first balloon, rather than replacing it.
+    public bool TryShowBalloon(string title, string text, bool warning)
     {
-        if (disposed) return;
+        if (disposed || DateTimeOffset.UtcNow < balloonBusyUntil) return false;
         var info = data;
         info.Flags = NIF_GUID | NIF_INFO; info.InfoTitle = title.Length > 63 ? title[..63] : title;
         info.Info = text.Length > 255 ? text[..255] : text; info.InfoFlags = warning ? 2 : 1;
-        Shell_NotifyIcon(NIM_MODIFY, ref info);
+        if (!(sendBalloon?.Invoke() ?? Shell_NotifyIcon(NIM_MODIFY, ref info))) return false;
+        // Recovery if Explorer or notification suppression omits the completion callback.
+        balloonBusyUntil = DateTimeOffset.UtcNow.AddMinutes(2);
+        return true;
     }
 
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -98,12 +105,15 @@ public sealed class TrayIcon : IDisposable
                 case 0x0400: // NIN_SELECT
                 case 0x0401: Click?.Invoke(); break; // NIN_KEYSELECT
                 case 0x007B: MenuRequested?.Invoke(); break; // WM_CONTEXTMENU
-                case 0x0405: BalloonClick?.Invoke(); break;
+                case 0x0403: // NIN_BALLOONHIDE
+                case 0x0404: balloonBusyUntil = DateTimeOffset.MinValue; break; // NIN_BALLOONTIMEOUT
+                case 0x0405: balloonBusyUntil = DateTimeOffset.MinValue; BalloonClick?.Invoke(); break;
             }
             handled = true;
         }
         else if (message == TaskbarCreated)
         {
+            balloonBusyUntil = DateTimeOffset.MinValue;
             Register();
             EnvironmentChanged?.Invoke();
         }

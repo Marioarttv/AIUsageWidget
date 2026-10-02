@@ -44,8 +44,10 @@ Claude readings work as soon as Claude Code is signed in. Optionally, run `app/C
 - Use the pin to switch between **Always on top** and **On desktop**. On desktop keeps the widget below every other window, even when clicked, while keeping its taskbar button.
 - Click **↻** to refresh both services. Both refresh automatically every 3 minutes.
 - Hover over a countdown or limit row for the exact local reset date and time.
-- Open **⋯** for **Start with Windows**, **Low 5-hour limit alerts**, **Hide**, and **Quit**.
+- Open **⋯** for **Start with Windows**, **Low 5-hour limit alerts**, **Reset notifications**, **Hide**, and **Quit**.
 - When a 5-hour limit drops below 10% remaining, a Windows notification appears once for that window. Click it to bring the widget forward. Alerts are on by default.
+- **Reset notifications** are also on by default for Claude and ChatGPT/Codex, including weekly and model-specific windows. A fresh reading must confirm the reset; countdown expiry alone never triggers one. Click a notification to open the widget. Reset history survives restarts, and simultaneous notifications wait their turn.
+- Resets are detected on the next successful refresh (normally every three minutes), including while the widget is hidden. Sleep, offline access, provider backoff, and Windows notification settings can delay or suppress alerts. A first reading establishes the baseline. Queued reset alerts expire after 30 minutes, and turning the setting off cancels pending reset alerts.
 - Enable **Start with Windows** once to launch the app when signing in after a shutdown or restart.
 - A compact **taskbar usage strip** keeps the Claude and ChatGPT logos with both **remaining percentages** together, immediately left of the primary taskbar's notification area. Each reading uses its shortest quota window (usually five hours); the ChatGPT mark represents the Codex subscription allowance.
 - The strip is a small app-owned overlay, enabled by default. It follows the taskbar's position and display scale, hides for fullscreen apps and an auto-hidden taskbar, and moves just outside the taskbar if space is occupied or its layout cannot be checked. It does not reserve or modify Explorer's taskbar space.
@@ -82,7 +84,7 @@ dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
 
 The publish command includes the Claude bridge, setup scripts, launchers, and user guide. Build output and local usage data are not committed.
 
-Core checks include native tray registration and cleanup, callbacks, Explorer recovery, the strip's readings and click behavior, and placement with DPI scaling, crowded or vertical taskbars, fullscreen, and auto-hide. Shell checks require an interactive Windows desktop. Add `-- --tray-preview` to save light/dark previews beside the test executable, or `-- --inspect-taskbar` to inspect taskbar geometry and the calculated strip position.
+Core checks include confirmed reset detection, persistence and deduplication, fresh Claude source timestamps, notification sequencing, native tray lifecycle, and the strip's readings, popup stacking, and placement. Shell checks require an interactive Windows desktop. Add `-- --tray-preview` to save light/dark previews beside the test executable, or `-- --inspect-taskbar` to inspect taskbar geometry and the calculated strip position.
 
 To run a live Codex and Claude connection check without opening the widget:
 
