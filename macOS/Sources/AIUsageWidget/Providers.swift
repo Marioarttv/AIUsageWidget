@@ -133,8 +133,13 @@ actor ClaudeProvider {
     /// Kept in memory only, until it nears expiry or Claude rejects it, so refreshes skip the Keychain read.
     private var credential: ClaudeCredentials.Credential?
     private(set) var keychainReads = 0
+    private(set) var renewals = 0
+    /// The expired token whose renewal Claude refused; a new login replaces it.
+    private var renewalRefused: String?
+    private var renewalRetryAfter = Date.distantPast
+    private static let expired = "Claude sign-in expired · open Claude Code to renew"
 
-    func refresh(minimumGap: TimeInterval = 150, allowKeychainUI: Bool = false) async -> ProviderResult {
+    func refresh(minimumGap: TimeInterval = 150, allowKeychainUI: Bool = false, allowRenewal: Bool = false) async -> ProviderResult {
         let now = Date()
         guard now >= backoffUntil, now.timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
         var fromKeychain = false
@@ -142,7 +147,9 @@ actor ClaudeProvider {
             if let failure = await readCredential(allowUI: allowKeychainUI) { return failure }
             fromKeychain = true
         }
-        guard let current = credential, current.valid(at: now) else { return .failure("Claude sign-in expired · open Claude Code to renew") }
+        // Claude Code renews ahead of expiry while it runs, so an expired item means nothing else is renewing it.
+        if allowRenewal, let lapsed = credential, lapsed.renewable, !lapsed.valid(at: now), let failure = await renew(lapsed) { return failure }
+        guard let current = credential, current.valid(at: now) else { return .failure(Self.expired) }
         // A denied Keychain read isn't an HTTP attempt: Connect must work immediately afterwards.
         lastAttempt = Date()
         if let result = await fetch(current) { return result }
@@ -150,7 +157,7 @@ actor ClaudeProvider {
         if !fromKeychain, await readCredential(allowUI: false) == nil, let renewed = credential, renewed.token != current.token,
            renewed.valid(at: Date()), let result = await fetch(renewed) { return result }
         credential = nil
-        return .failure("Claude sign-in expired · open Claude Code to renew")
+        return .failure(Self.expired)
     }
 
     /// Replaces the cached credential; returns a failure to report, or nil on success.
@@ -159,6 +166,18 @@ actor ClaudeProvider {
         switch await Task.detached(priority: .utility, operation: { ClaudeCredentials.read(allowUI: allowUI) }).value {
         case .failure(let message): credential = nil; return .failure(message)
         case .success(let read): credential = read; return nil
+        }
+    }
+
+    /// Replaces an expired credential with a renewed one; returns a failure to report, or nil to continue.
+    private func renew(_ lapsed: ClaudeCredentials.Credential) async -> ProviderResult? {
+        let ended = ProviderResult.failure("Claude sign-in ended · sign in to Claude Code again")
+        if renewalRefused == lapsed.token { return ended }
+        guard Date() >= renewalRetryAfter else { return nil }
+        switch await ClaudeCredentials.renew(lapsedToken: lapsed.token, session: session) {
+        case .renewed(let fresh): credential = fresh; renewals += 1; return nil
+        case .refused: renewalRefused = lapsed.token; return ended
+        case .unavailable: renewalRetryAfter = Date().addingTimeInterval(300); return nil
         }
     }
 
@@ -197,18 +216,23 @@ actor ClaudeProvider {
 }
 
 private enum ClaudeCredentials {
+    static let service = "Claude Code-credentials"
     struct Credential {
         let token: String; let plan: String?; let expiresAt: Date?
+        /// Read from Claude Code's default Keychain item, which the widget may renew.
+        var renewable = false
         func valid(at date: Date) -> Bool { expiresAt.map { $0 > date } ?? true }
     }
     enum ReadResult { case success(Credential), failure(String) }
+    enum RenewResult { case renewed(Credential), refused, unavailable }
+
     static func read(allowUI: Bool) -> ReadResult {
         let configured = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
         var data: Data?
         // A custom config directory has a distinct Keychain identity. The file fallback is supported here.
         // Claude Code writes the item with /usr/bin/security, so that tool is on its ACL and reads silently.
         // Claude Code rewrites the item on token renewal, so an "Always Allow" granted to this app doesn't last.
-        if configured == nil { data = viaSecurityTool() }
+        if configured == nil { data = SecurityTool.read(service: service) }
         if configured == nil, data == nil {
             // Claude uses the legacy login Keychain. LAContext alone does not suppress its ACL
             // prompts, so bracket this one serialized read with the legacy interaction control.
@@ -219,7 +243,7 @@ private enum ClaudeCredentials {
             let context = LAContext()
             context.interactionNotAllowed = !allowUI
             let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: "Claude Code-credentials", kSecReturnData as String: true,
+                kSecAttrService as String: service, kSecReturnData as String: true,
                 kSecMatchLimit as String: kSecMatchLimitOne,
                 kSecUseAuthenticationContext as String: context]
             var item: CFTypeRef?
@@ -229,33 +253,62 @@ private enum ClaudeCredentials {
                 return .failure("Connect Claude… in the menu to allow Keychain access")
             }
         }
+        let fromKeychain = data != nil
         if data == nil {
             let directory = configured.map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
             data = try? Data(contentsOf: directory.appendingPathComponent(".credentials.json"))
         }
-        guard let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let oauth = root["claudeAiOauth"] as? [String: Any], let token = oauth["accessToken"] as? String, !token.isEmpty else {
+        guard let data, let credential = parse(data, renewable: fromKeychain) else {
             return .failure(configured == nil ? "Sign in to Claude Code to connect" : "Custom Claude config: credential file not available")
         }
-        let expiry = (oauth["expiresAt"] as? Double).flatMap { $0.isFinite && $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil }
-        return .success(Credential(token: token, plan: oauth["subscriptionType"] as? String, expiresAt: expiry))
+        return .success(credential)
     }
 
-    private static func viaSecurityTool() -> Data? {
-        let process = Process(), output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        let timer = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 10, execute: timer)
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timer.cancel()
-        try? output.fileHandleForReading.close()
-        guard process.terminationReason == .exit, process.terminationStatus == 0, data.count < 100_000 else { return nil }
-        return data
+    private static func parse(_ data: Data, renewable: Bool) -> Credential? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let oauth = root["claudeAiOauth"] as? [String: Any], let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
+        let expiry = (oauth["expiresAt"] as? Double).flatMap { $0.isFinite && $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil }
+        return Credential(token: token, plan: oauth["subscriptionType"] as? String, expiresAt: expiry, renewable: renewable)
+    }
+
+    /// Renews the default Keychain item under Claude Code's refresh lock, re-checking it once the lock is held.
+    static func renew(lapsedToken: String, session: URLSession) async -> RenewResult {
+        guard ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map({ $0.isEmpty }) ?? true else { return .unavailable }
+        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+        guard let lock = await ClaudeRefreshLock.acquire(claudeDirectory: directory) else { return .unavailable }
+        defer { lock.release() }
+        guard let stored = SecurityTool.read(service: service), let current = parse(stored, renewable: true) else { return .unavailable }
+        // Claude Code renewed it, or a new login replaced it, while the widget waited.
+        if current.token != lapsedToken { return current.valid(at: Date()) ? .renewed(current) : .unavailable }
+        guard let body = ClaudeRenewal.request(stored: stored, now: Date()) else { return .refused }
+        var request = URLRequest(url: ClaudeRenewal.tokenURL)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("AIUsageWidget/1.2.0", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return .unavailable }
+        // A spent or revoked refresh token needs a new login; retrying it can't help.
+        if [400, 401, 403].contains(http.statusCode) { return .refused }
+        guard http.statusCode == 200, data.count < 100_000,
+              let merged = ClaudeRenewal.merge(stored: stored, response: data, now: Date()),
+              let fresh = parse(merged, renewable: true) else { return .unavailable }
+        // The old refresh token is spent now; the widget keeps reading even if the item can't be updated.
+        _ = save(merged, replacing: ClaudeRenewal.refreshToken(stored))
+        return .renewed(fresh)
+    }
+
+    /// Writes renewed tokens unless something else saved newer ones meanwhile, confirmed by reading back.
+    private static func save(_ merged: Data, replacing previous: String?) -> Bool {
+        guard let account = SecurityTool.account(service: service) else { return false }
+        let renewed = ClaudeRenewal.refreshToken(merged)
+        for attempt in 0..<3 {
+            if attempt > 0 { usleep(UInt32(100_000 * attempt)) }
+            guard let stored = SecurityTool.read(service: service) else { continue }
+            let latest = ClaudeRenewal.refreshToken(stored)
+            if latest == renewed { return true }
+            if latest != previous { return false }
+            _ = SecurityTool.write(service: service, account: account, data: merged)
+        }
+        return SecurityTool.read(service: service).flatMap(ClaudeRenewal.refreshToken) == renewed
     }
 }

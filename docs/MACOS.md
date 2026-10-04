@@ -18,7 +18,7 @@ The build uses an existing Apple Development signing identity when available, wi
 - **Pin** switches to a floating panel above normal windows. Full-screen behavior depends on the active Space and macOS; system/security surfaces retain their own ordering.
 - **Drag the AI USAGE title** to reposition the panel. The position and display mode persist. Disconnecting a display brings an offscreen panel back onto an available display.
 - **The Claude and ChatGPT marks in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
-- **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, and Claude connection access.
+- **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, Claude connection access, and automatic Claude sign-in renewal.
 - **Refresh While Visible** (1–30 minutes, default 3) sets how often readings refresh while the panel or menu-bar view is on screen; the panel footer shows it. **Refresh While Hidden** (5–60 minutes, default 10) applies while the panel is hidden or fully covered; it is never shorter than the visible interval. Intervals under three minutes poll Claude's rate-limited usage endpoint more often and are more likely to meet its backoff.
 - **↻** refreshes manually. Requests still respect the provider's minimum interval and rate-limit backoff.
 - Hover over a reset time for the exact local date and time. Expired windows show “awaiting update” instead of inventing a full allowance. Failed readings retain visibly dimmed last-known data with an explanation.
@@ -41,7 +41,8 @@ Detection happens at the next successful refresh while the Mac is awake: at the 
 ## Usage connections and privacy
 
 - **Codex:** invokes the installed native CLI's documented `account/rateLimits/read` over stdio, after the initialization handshake. The CLI owns sign-in and authentication. No model requests, conversation reads, reset-credit redemption, or listening network port are used. The short-lived process exits after the reading, with a bounded timeout. Homebrew/npm and common native CLI locations are supported. A CLI account can differ from the account selected in the Codex desktop app.
-- **Claude:** reads the existing `Claude Code-credentials` item from the macOS Keychain through `/usr/bin/security`, the same way Claude Code reads it. Claude Code creates the item with that tool, so the read is silent and keeps working after Claude Code renews its sign-in. If that read fails, the app queries the Keychain directly without a prompt; **Connect Claude…** allows macOS to request access. The credentials-file fallback is also supported, including `CLAUDE_CONFIG_DIR`; custom-directory Keychain identities are not currently queried. The token is kept in memory only, until it nears expiry or Claude rejects it; it is never logged, written to disk, or refreshed by the widget. Open Claude Code to renew an expired sign-in.
+- **Claude:** reads the existing `Claude Code-credentials` item from the macOS Keychain through `/usr/bin/security`, the same way Claude Code reads it. Claude Code creates the item with that tool, so the read is silent and keeps working after Claude Code renews its sign-in. If that read fails, the app queries the Keychain directly without a prompt; **Connect Claude…** allows macOS to request access. The credentials-file fallback is also supported, including `CLAUDE_CONFIG_DIR`; custom-directory Keychain identities are not currently queried. The token is kept in memory only, until it nears expiry or Claude rejects it; it is never logged or written to the app's files.
+- **Claude sign-in renewal:** Claude Code's access token lasts about eight hours, and Claude Code renews it only while it runs. With **Renew Claude Sign-In Automatically** (in **⋯**, on by default), the widget renews a lapsed sign-in the way Claude Code does: it holds Claude Code's own refresh lock (`~/.claude/.oauth_refresh.lock` and `~/.claude.lock`), re-reads the Keychain item, and renews only if the token is still expired, then saves the renewed tokens back into `Claude Code-credentials` through `/usr/bin/security`. Claude Code then picks up the renewed sign-in instead of renewing it a second time; two simultaneous renewals would spend the same single-use refresh token and sign you out. Renewal applies only to the default Keychain item, never to `CLAUDE_CONFIG_DIR` or the credentials file, and `--check` never renews. If Claude refuses the renewal, the panel asks you to sign in to Claude Code again. Turn the setting off to leave renewal to Claude Code; then open Claude Code to renew an expired sign-in.
 - Claude's account-usage endpoint is not a public, stable API and can change. The app honors HTTP 429 and `Retry-After`, including date-form headers. It does not install or change Claude status-line configuration.
 
 Usage snapshots and alert history are stored in `~/Library/Application Support/AIUsageWidget/usage.json`. The directory is private to the user. Preferences use the `com.mariomanzocco.aiusagewidget` defaults domain. No conversation content or authentication tokens are stored there.
@@ -62,7 +63,7 @@ swift test --package-path macOS --jobs 4
 "$HOME/Applications/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --check
 ```
 
-`--check` prints only connection status and window counts. It does not start the widget, request Keychain interaction, or send notifications. A failed provider gives exit code 1.
+`--check` prints only connection status and window counts. It does not start the widget, request Keychain interaction, renew the Claude sign-in, or send notifications. A failed provider gives exit code 1.
 
 With the installed app running, this requests a small runtime report:
 
@@ -71,7 +72,9 @@ With the installed app running, this requests a small runtime report:
 cat "$HOME/Library/Application Support/AIUsageWidget/diagnostics.json"
 ```
 
-Core tests cover parsing, missing/zero values, dynamic durations, multiple quota buckets, strict alert thresholds, persistent deduplication, reset confirmation, stale/out-of-order observations, and permission-delay recovery. Live UI, credentials, and macOS notification delivery are separate runtime checks.
+`diagnostics.json` includes `claudeRenewals`, the number of sign-in renewals since launch.
+
+Core tests cover Claude sign-in renewal requests, token merging, and Claude Code's refresh lock, as well as parsing, missing/zero values, dynamic durations, multiple quota buckets, strict alert thresholds, persistent deduplication, reset confirmation, stale/out-of-order observations, and permission-delay recovery. Set `AIW_KEYCHAIN_TESTS=1` to add a Keychain write/read round trip on a scratch item (never Claude Code's). Live UI, credentials, sign-in renewal against Claude, and macOS notification delivery are separate runtime checks.
 
 ## Remove
 

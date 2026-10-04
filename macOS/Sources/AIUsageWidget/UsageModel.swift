@@ -47,6 +47,10 @@ final class UsageModel: ObservableObject {
     @Published var resetAlerts = UserDefaults.standard.object(forKey: "resetAlerts") as? Bool ?? true {
         didSet { UserDefaults.standard.set(resetAlerts, forKey: "resetAlerts") }
     }
+    /// Renews Claude Code's sign-in after it lapses, instead of waiting for Claude Code to be opened.
+    @Published var renewClaude = UserDefaults.standard.object(forKey: "renewClaude") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(renewClaude, forKey: "renewClaude") }
+    }
     /// How often to refresh while the panel or menu-bar view is on screen.
     @Published var watchedInterval = RefreshInterval.stored("watchedInterval", choices: RefreshInterval.watchedChoices, default: 180) {
         didSet { UserDefaults.standard.set(watchedInterval, forKey: "watchedInterval"); reschedule() }
@@ -117,9 +121,10 @@ final class UsageModel: ObservableObject {
         refreshTimer?.invalidate()
         // Automatic refreshes keep some slack below the chosen cadence, but never poll faster than the default allows.
         let gap: TimeInterval = manual ? 30 : min(150, watchedInterval - 15)
+        let renew = renewClaude
         Task {
             await withTaskGroup(of: (ProviderID, ProviderResult).self) { group in
-                group.addTask { [claude] in (.claude, await claude.refresh(minimumGap: gap, allowKeychainUI: allowKeychainUI)) }
+                group.addTask { [claude] in (.claude, await claude.refresh(minimumGap: gap, allowKeychainUI: allowKeychainUI, allowRenewal: renew)) }
                 group.addTask { [codex] in (.codex, await codex.refresh(minimumGap: gap)) }
                 for await (provider, result) in group {
                     now = Date()
@@ -236,9 +241,9 @@ final class UsageModel: ObservableObject {
     var menuTitle: String { menuReadings.map { "\($0.provider.title) \($0.value)" }.joined(separator: " · ") }
 
     func writeDiagnostics(window: NSWindow) {
-        Task { writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads) }
+        Task { writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads, claudeRenewals: await claude.renewals) }
     }
-    private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int) {
+    private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int, claudeRenewals: Int) {
         let data: [String: Any] = [
             "version": "1.2.0", "startedAt": startedAt.timeIntervalSince1970,
             "refreshCount": refreshCount, "refreshing": refreshing, "suspended": suspended,
@@ -247,6 +252,7 @@ final class UsageModel: ObservableObject {
             "notifications": notificationStatus, "lowAlerts": lowAlerts, "resetAlerts": resetAlerts,
             "watchedInterval": Int(watchedInterval), "unwatchedInterval": Int(effectiveUnwatchedInterval),
             "watched": viewed, "nextRefreshIn": Int(refreshTimer.map { $0.isValid ? $0.fireDate.timeIntervalSinceNow : 0 } ?? 0), "claudeKeychainReads": claudeKeychainReads,
+            "renewClaude": renewClaude, "claudeRenewals": claudeRenewals,
             "services": Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { id in
                 (id.rawValue, ["windowCount": services[id]?.snapshot?.windows.count ?? 0,
                               "status": services[id]?.status ?? "connected"] as [String: Any])
