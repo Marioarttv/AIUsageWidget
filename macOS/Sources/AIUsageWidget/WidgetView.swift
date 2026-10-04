@@ -44,6 +44,7 @@ struct WidgetView: View {
                     Text(model.notificationStatus)
                     Divider()
                     Button("Connect Claude…") { model.refresh(manual: true, allowKeychainUI: true) }
+                    Toggle("Renew Claude Sign-In Automatically", isOn: $model.renewClaude)
                     Button("Refresh Now") { model.refresh(manual: true) }.keyboardShortcut("r").disabled(model.refreshing)
                     Divider()
                     Button("Quit AI Usage Widget") { NSApp.terminate(nil) }.keyboardShortcut("q")
