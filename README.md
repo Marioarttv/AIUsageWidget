@@ -14,6 +14,8 @@ The Mac app uses SwiftUI and AppKit, with a desktop panel, an always-on-top togg
 
 This builds, signs using an existing Apple Development identity when available, installs to `~/Applications/AI Usage Widget.app`, and opens the app. It starts in desktop mode. Drag its title to move it; click the pin to keep it above other windows. The menu bar shows the Claude and ChatGPT/Codex marks with each remaining allowance; click it for the complete widget and settings.
 
+To track more than one ChatGPT subscription, sign the extra account in to [Codex Subscription Router](https://github.com/b-nnett/codex-subscription-router); the widget finds it automatically and shows each account with its email. Choose which accounts to show in **⋯ → ChatGPT Accounts**, or add another Codex sign-in folder there. See [the Mac guide](docs/MACOS.md#multiple-chatgpt-accounts).
+
 Allow notifications when macOS asks. Claude connects automatically when Claude Code is signed in; if it still needs Keychain permission, choose **⋯ → Connect Claude…**. Enable **Launch at Login** in that menu if desired.
 
 Both notification types are on by default:

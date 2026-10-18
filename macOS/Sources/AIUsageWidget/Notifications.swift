@@ -22,18 +22,22 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         let status = await permission()
         guard status == .authorized || status == .provisional else { return [] }
         var accepted: [String] = []
-        for provider in ProviderID.allCases {
+        var sources: [String] = []
+        for event in events where !sources.contains(event.sourceID) { sources.append(event.sourceID) }
+        for source in sources {
             for kind in [UsageAlert.Kind.low, .reset] {
-                let group = events.filter { $0.provider == provider && $0.kind == kind }
-                guard !group.isEmpty else { continue }
+                let group = events.filter { $0.sourceID == source && $0.kind == kind }
+                guard let first = group.first else { continue }
+                // Names the account when several ChatGPT sign-ins are tracked.
+                let name = first.account.map { first.provider.title + " · " + $0 } ?? first.provider.title
                 let content = UNMutableNotificationContent()
-                content.title = kind == .low ? "\(provider.title): less than 10% remaining" : "\(provider.title) usage reset"
+                content.title = kind == .low ? "\(name): less than 10% remaining" : "\(name) usage reset"
                 content.body = group.map { event in
                     kind == .low ? "\(event.label): \(Int(event.remaining.rounded(.down)))% left."
                         : "\(event.label) has reset · \(Int(event.remaining.rounded(.down)))% remaining."
                 }.joined(separator: "\n")
                 content.sound = .default
-                content.threadIdentifier = provider.rawValue
+                content.threadIdentifier = source
                 let digest = SHA256.hash(data: Data(group.map(\.id).sorted().joined(separator: "|").utf8))
                 let identifier = digest.map { String(format: "%02x", $0) }.joined()
                 do {
