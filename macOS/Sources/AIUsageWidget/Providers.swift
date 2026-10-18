@@ -13,16 +13,22 @@ enum ProviderResult {
 enum ProviderError: Error { case unavailable, timedOut, invalidResponse, authentication, disconnected }
 
 actor CodexProvider {
+    /// The Codex home to read; nil uses Codex's default sign-in.
+    let home: String?
+    private let signIn: String
     private var lastAttempt = Date.distantPast
+    init(home: String? = nil, signIn: String = "Sign in to Codex CLI to connect") { self.home = home; self.signIn = signIn }
+
     func refresh(minimumGap: TimeInterval = 150) async -> ProviderResult {
         guard Date().timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
         lastAttempt = Date()
+        let home = home, signIn = signIn
         return await Task.detached(priority: .utility) {
             do {
-                let snapshot = try UsageParser.codex(CodexReader.read())
+                let snapshot = try UsageParser.codex(CodexReader.read(home: home))
                 return snapshot.windows.isEmpty ? .failure("No subscription windows returned") : .reading(snapshot)
             } catch ProviderError.unavailable { return .failure("Install and sign in to Codex CLI") }
-            catch ProviderError.authentication { return .failure("Sign in to Codex CLI to connect") }
+            catch ProviderError.authentication { return .failure(signIn) }
             catch ProviderError.timedOut { return .failure("Refresh timed out · retrying automatically") }
             catch { return .failure("Refresh failed · showing last reading") }
         }.value
@@ -54,11 +60,17 @@ enum CodexReader {
         return nil
     }
 
-    static func read() throws -> Data {
+    static func read(home: String? = nil) throws -> Data {
         guard let executable = executable() else { throw ProviderError.unavailable }
         let process = Process(), input = Pipe(), output = Pipe()
         process.executableURL = executable
         process.arguments = ["app-server", "--listen", "stdio://"]
+        if let home {
+            // An additional sign-in, such as a Codex Subscription Router account, keeps its own Codex home.
+            var environment = ProcessInfo.processInfo.environment
+            environment["CODEX_HOME"] = home
+            process.environment = environment
+        }
         process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         process.standardInput = input
         process.standardOutput = output

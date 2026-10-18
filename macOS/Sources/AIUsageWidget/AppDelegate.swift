@@ -73,8 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         let title = model.menuTitle
         if title != statusTitle, let button = statusItem.button {
             statusTitle = title
-            button.image = StatusIcon.image(model.menuReadings)
+            let readings = model.menuReadings
+            button.image = StatusIcon.image(readings)
             button.setAccessibilityTitle(title)
+            button.toolTip = "AI Usage · remaining allowance\n" + readings.map { "\($0.name): \($0.value)" }.joined(separator: "\n")
+                + "\nClick for allowance and reset times."
         }
         let height = ceil(hosting.fittingSize.height)
         if height > 0 && abs(height - panel.frame.height) > 1 {
