@@ -43,6 +43,16 @@ struct WidgetView: View {
                     Button("Notification Settings…") { model.openNotificationSettings() }
                     Text(model.notificationStatus)
                     Divider()
+                    Menu("ChatGPT Accounts") {
+                        ForEach(model.codexAccounts) { account in
+                            Toggle(accountTitle(account), isOn: Binding(get: { model.isTracked(account) },
+                                                                         set: { model.setTracked(account, $0) }))
+                                .disabled(account.key == nil)
+                        }
+                        Divider()
+                        Button("Add Codex Sign-In Folder…") { model.addCodexFolder() }
+                        Text("Codex Subscription Router accounts appear automatically")
+                    }
                     Button("Connect Claude…") { model.refresh(manual: true, allowKeychainUI: true) }
                     Toggle("Renew Claude Sign-In Automatically", isOn: $model.renewClaude)
                     Button("Refresh Now") { model.refresh(manual: true) }.keyboardShortcut("r").disabled(model.refreshing)
@@ -53,10 +63,10 @@ struct WidgetView: View {
                     .help("Widget settings").accessibilityLabel("Widget settings")
             }.font(.system(size: 12, weight: .medium)).buttonStyle(.plain)
 
-            ForEach(ProviderID.allCases) { provider in
-                if provider == .codex { Divider().overlay(Color.white.opacity(0.05)) }
-                ProviderView(provider: provider, state: model.services[provider] ?? ServiceState(), now: model.now,
-                             staleAfter: model.staleAfter)
+            ForEach(model.sources) { source in
+                if source != model.sources.first { Divider().overlay(Color.white.opacity(0.05)) }
+                ProviderView(provider: source.provider, account: model.accountName(source),
+                             state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter)
             }
             HStack(spacing: 5) {
                 Image(systemName: model.topmost ? "pin.fill" : "desktopcomputer")
@@ -79,10 +89,23 @@ struct WidgetView: View {
         .preferredColorScheme(.dark)
         .fixedSize(horizontal: false, vertical: true)
     }
+
+    private func accountTitle(_ account: CodexAccount) -> String {
+        var parts = [account.name]
+        if let plan = account.plan { parts.append(plan.capitalized) }
+        switch account.origin {
+        case .main: parts.append("Main sign-in")
+        case .router: parts.append("Subscription Router")
+        case .folder: if !account.signedIn { parts.append("Signed out") }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 private struct ProviderView: View {
     let provider: ProviderID
+    /// The signed-in email for ChatGPT/Codex accounts, so several subscriptions can be told apart.
+    let account: String?
     let state: ServiceState
     let now: Date
     let staleAfter: TimeInterval
@@ -93,9 +116,13 @@ private struct ProviderView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Circle().fill(accent).frame(width: 6, height: 6)
-                Text(provider.title).font(.system(size: 14, weight: .semibold))
-                Spacer()
-                if let plan = state.snapshot?.plan { Text(plan.capitalized).font(.system(size: 10)).foregroundStyle(.secondary) }
+                Text(provider.title).font(.system(size: 14, weight: .semibold)).layoutPriority(1)
+                if let account {
+                    Text(account).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        .help(account)
+                }
+                Spacer(minLength: 4)
+                if let plan = state.snapshot?.plan { Text(plan.capitalized).font(.system(size: 10)).foregroundStyle(.secondary).layoutPriority(1) }
             }
             if let primary {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -135,7 +162,7 @@ private struct ProviderView: View {
             }
             Text(UsageFormatting.age(state.snapshot?.updatedAt, now: now))
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
-        }.accessibilityElement(children: .contain).accessibilityLabel(provider.title + " usage")
+        }.accessibilityElement(children: .contain).accessibilityLabel(account.map { "\(provider.title) usage for \($0)" } ?? provider.title + " usage")
     }
     private func quotaBar(_ window: UsageWindow, height: CGFloat) -> some View {
         GeometryReader { geometry in

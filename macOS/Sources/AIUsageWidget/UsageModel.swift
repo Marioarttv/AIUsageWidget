@@ -32,7 +32,12 @@ private struct RuntimeCache: Codable {
 
 @MainActor
 final class UsageModel: ObservableObject {
-    @Published var services: [ProviderID: ServiceState] = [:]
+    /// Readings keyed by `UsageSource.id`.
+    @Published var services: [String: ServiceState] = [:]
+    /// Claude, then each tracked ChatGPT/Codex sign-in, in display order.
+    @Published private(set) var sources: [UsageSource] = [.claude, .codex]
+    /// Every ChatGPT/Codex sign-in found, tracked or not.
+    @Published private(set) var codexAccounts: [CodexAccount] = []
     @Published var now = Date()
     @Published var refreshing = false
     @Published var topmost = UserDefaults.standard.bool(forKey: "topmost") {
@@ -69,7 +74,14 @@ final class UsageModel: ObservableObject {
     var onWindowSettings: (() -> Void)?
     var onUpdate: (() -> Void)?
     var onShow: (() -> Void)?
-    private let claude = ClaudeProvider(), codex = CodexProvider()
+    private let claude = ClaudeProvider()
+    private var codexProviders: [String: CodexProvider] = [:]
+    /// Additional sign-ins the user turned on or off; others follow `CodexAccount.trackedByDefault`.
+    private var codexOn = UserDefaults.standard.stringArray(forKey: "codexAccountsOn") ?? []
+    private var codexOff = UserDefaults.standard.stringArray(forKey: "codexAccountsOff") ?? []
+    /// Codex home folders added in settings.
+    private var codexFolders = UserDefaults.standard.stringArray(forKey: "codexFolders") ?? []
+    private var refreshAgain = false
     let notifications = Notifications()
     private var cache = RuntimeCache()
     private var refreshTimer: Timer?
@@ -91,9 +103,88 @@ final class UsageModel: ObservableObject {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         if let data = try? Data(contentsOf: Self.dataDirectory.appendingPathComponent("usage.json")),
            let saved = try? decoder.decode(RuntimeCache.self, from: data) { cache = saved }
-        for provider in ProviderID.allCases {
-            services[provider] = ServiceState(snapshot: cache.snapshots[provider.rawValue], status: "Connecting…")
+        applyAccounts(CodexAccounts.discover(folders: codexFolders))
+    }
+
+    /// Shows tracked accounts and keeps one reader per account, reusing readers whose home is unchanged.
+    private func applyAccounts(_ accounts: [CodexAccount]) {
+        codexAccounts = accounts
+        let tracked = CodexAccounts.tracked(accounts, on: Set(codexOn), off: Set(codexOff))
+        var providers: [String: CodexProvider] = [:]
+        for account in tracked {
+            if let existing = codexProviders[account.id], existing.home == account.home { providers[account.id] = existing; continue }
+            let signIn: String
+            switch account.origin {
+            case .main: signIn = "Sign in to Codex CLI to connect"
+            case .router: signIn = "Sign in to this account again in Codex Subscription Router"
+            case .folder: signIn = "Sign in to Codex again with this folder as CODEX_HOME"
+            }
+            providers[account.id] = CodexProvider(home: account.home, signIn: signIn)
         }
+        codexProviders = providers
+        let next = [UsageSource.claude] + tracked.map(\.source)
+        if next != sources { sources = next }
+        for source in sources where services[source.id] == nil {
+            services[source.id] = ServiceState(snapshot: cache.snapshots[source.id], status: "Connecting…")
+        }
+    }
+
+    /// The account's email, shown for ChatGPT/Codex sign-ins.
+    func accountName(_ source: UsageSource) -> String? {
+        guard source.provider == .codex, let account = codexAccounts.first(where: { $0.source == source }) else { return nil }
+        return account.origin == .main ? account.email : account.name
+    }
+    func title(_ source: UsageSource) -> String {
+        accountName(source).map { source.provider.title + " · " + $0 } ?? source.provider.title
+    }
+    private var multipleCodexAccounts: Bool { sources.filter { $0.provider == .codex }.count > 1 }
+
+    func isTracked(_ account: CodexAccount) -> Bool { sources.contains(account.source) }
+
+    /// Turning off an added folder removes it from the list.
+    func setTracked(_ account: CodexAccount, _ on: Bool) {
+        guard let key = account.key else { return }
+        if !on, account.origin == .folder, let home = account.home {
+            codexFolders.removeAll { URL(fileURLWithPath: $0).standardizedFileURL.path == home }
+        }
+        codexOn.removeAll { $0 == key }; codexOff.removeAll { $0 == key }
+        if on { codexOn.append(key) } else { codexOff.append(key) }
+        saveAccountChoices()
+        applyAccounts(CodexAccounts.discover(folders: codexFolders))
+        if on { refresh(manual: true) }
+        onUpdate?()
+    }
+
+    /// Adds a Codex home folder holding another ChatGPT sign-in, such as one made with `CODEX_HOME=… codex login`.
+    func addCodexFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a Codex Sign-In Folder"
+        panel.message = "Choose a Codex home folder (it contains auth.json), such as one used with CODEX_HOME."
+        panel.prompt = "Add Account"
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url?.standardizedFileURL else { return }
+        guard let identity = CodexAccounts.identity(home: url) else {
+            message = "No ChatGPT sign-in found in that folder"; onUpdate?(); return
+        }
+        if let existing = codexAccounts.first(where: { $0.accountID != nil && $0.accountID == identity.accountID }) {
+            if existing.key != nil && !isTracked(existing) { setTracked(existing, true) }
+            message = "\(existing.name) is already listed"; onUpdate?(); return
+        }
+        if !codexFolders.contains(url.path) { codexFolders.append(url.path) }
+        let key = identity.accountID ?? url.path
+        codexOff.removeAll { $0 == key }
+        saveAccountChoices()
+        applyAccounts(CodexAccounts.discover(folders: codexFolders))
+        refresh(manual: true)
+    }
+
+    private func saveAccountChoices() {
+        UserDefaults.standard.set(codexOn, forKey: "codexAccountsOn")
+        UserDefaults.standard.set(codexOff, forKey: "codexAccountsOff")
+        UserDefaults.standard.set(codexFolders, forKey: "codexFolders")
     }
 
     func start() {
@@ -116,24 +207,33 @@ final class UsageModel: ObservableObject {
     }
 
     func refresh(manual: Bool = false, allowKeychainUI: Bool = false) {
-        guard !refreshing, !suspended else { return }
+        guard !suspended else { return }
+        // A newly tracked account is read as soon as the refresh in progress finishes.
+        guard !refreshing else { if manual { refreshAgain = true }; return }
         refreshing = true
         refreshTimer?.invalidate()
         // Automatic refreshes keep some slack below the chosen cadence, but never poll faster than the default allows.
         let gap: TimeInterval = manual ? 30 : min(150, watchedInterval - 15)
         let renew = renewClaude
+        let folders = codexFolders
         Task {
-            await withTaskGroup(of: (ProviderID, ProviderResult).self) { group in
+            // Picks up accounts signed in or out of Codex Subscription Router since the last refresh.
+            applyAccounts(await Task.detached(priority: .utility) { CodexAccounts.discover(folders: folders) }.value)
+            let codex = sources.compactMap { source in codexProviders[source.id].map { (source, $0) } }
+            await withTaskGroup(of: (UsageSource, ProviderResult).self) { group in
                 group.addTask { [claude] in (.claude, await claude.refresh(minimumGap: gap, allowKeychainUI: allowKeychainUI, allowRenewal: renew)) }
-                group.addTask { [codex] in (.codex, await codex.refresh(minimumGap: gap)) }
-                for await (provider, result) in group {
+                for (source, provider) in codex {
+                    group.addTask { (source, await provider.refresh(minimumGap: gap)) }
+                }
+                for await (source, result) in group {
                     now = Date()
                     switch result {
                     case .reading(let snapshot):
-                        services[provider] = ServiceState(snapshot: snapshot)
-                        cache.snapshots[provider.rawValue] = snapshot
-                        cache.alerts.observe(snapshot, provider: provider, lowEnabled: lowAlerts, resetEnabled: resetAlerts, now: now)
-                    case .failure(let status): services[provider, default: ServiceState()].status = status
+                        services[source.id] = ServiceState(snapshot: snapshot)
+                        cache.snapshots[source.id] = snapshot
+                        cache.alerts.observe(snapshot, source: source, account: multipleCodexAccounts ? accountName(source) : nil,
+                                             lowEnabled: lowAlerts, resetEnabled: resetAlerts, now: now)
+                    case .failure(let status): services[source.id, default: ServiceState()].status = status
                     case .skipped: break
                     }
                     let ids = await notifications.send(cache.alerts.deliverable(now: now, lowEnabled: lowAlerts, resetEnabled: resetAlerts))
@@ -148,6 +248,7 @@ final class UsageModel: ObservableObject {
             refreshing = false
             onUpdate?()
             scheduleRefresh()
+            if refreshAgain { refreshAgain = false; refresh(manual: true) }
         }
     }
 
@@ -230,15 +331,15 @@ final class UsageModel: ObservableObject {
     func openNotificationSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
-    var menuReadings: [(provider: ProviderID, value: String)] {
-        ProviderID.allCases.map { provider in
-            let state = services[provider]
+    var menuReadings: [StatusIcon.Reading] {
+        sources.map { source in
+            let state = services[source.id]
             let value = state?.snapshot?.primary
             let number = value.flatMap { !($0.expired(at: now)) && state?.stale(at: now, after: staleAfter) == false ? "\(Int($0.remaining.rounded(.down)))%" : nil } ?? "—"
-            return (provider, number)
+            return StatusIcon.Reading(provider: source.provider, value: number, name: title(source))
         }
     }
-    var menuTitle: String { menuReadings.map { "\($0.provider.title) \($0.value)" }.joined(separator: " · ") }
+    var menuTitle: String { menuReadings.map { "\($0.name) \($0.value)" }.joined(separator: " · ") }
 
     func writeDiagnostics(window: NSWindow) {
         Task { writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads, claudeRenewals: await claude.renewals) }
@@ -253,9 +354,10 @@ final class UsageModel: ObservableObject {
             "watchedInterval": Int(watchedInterval), "unwatchedInterval": Int(effectiveUnwatchedInterval),
             "watched": viewed, "nextRefreshIn": Int(refreshTimer.map { $0.isValid ? $0.fireDate.timeIntervalSinceNow : 0 } ?? 0), "claudeKeychainReads": claudeKeychainReads,
             "renewClaude": renewClaude, "claudeRenewals": claudeRenewals,
-            "services": Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { id in
-                (id.rawValue, ["windowCount": services[id]?.snapshot?.windows.count ?? 0,
-                              "status": services[id]?.status ?? "connected"] as [String: Any])
+            "codexAccountsFound": codexAccounts.count,
+            "services": Dictionary(uniqueKeysWithValues: sources.map { source in
+                (source.id, ["windowCount": services[source.id]?.snapshot?.windows.count ?? 0,
+                             "status": services[source.id]?.status ?? "connected"] as [String: Any])
             })
         ]
         if let bytes = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) {

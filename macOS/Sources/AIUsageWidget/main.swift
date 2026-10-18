@@ -5,16 +5,29 @@ let arguments = CommandLine.arguments
 if arguments.contains("--check") {
     signal(SIGPIPE, SIG_IGN)
     Task {
-        async let claude = ClaudeProvider().refresh()
-        async let codex = CodexProvider().refresh()
+        // Checks every tracked ChatGPT/Codex sign-in, using the widget's saved account choices.
+        let defaults = UserDefaults.standard
+        let accounts = CodexAccounts.tracked(CodexAccounts.discover(folders: defaults.stringArray(forKey: "codexFolders") ?? []),
+                                             on: Set(defaults.stringArray(forKey: "codexAccountsOn") ?? []),
+                                             off: Set(defaults.stringArray(forKey: "codexAccountsOff") ?? []))
+        let results = await withTaskGroup(of: (String, String?, ProviderResult).self) { group in
+            group.addTask { ("claude", nil, await ClaudeProvider().refresh()) }
+            for account in accounts {
+                group.addTask { (account.source.id, account.email, await CodexProvider(home: account.home).refresh()) }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
         var report: [String: Any] = [:]
         var ok = true
-        for (id, result) in await [(ProviderID.claude, claude), (.codex, codex)] {
+        for (id, account, result) in results {
+            var entry: [String: Any]
             switch result {
-            case .reading(let snapshot): report[id.rawValue] = ["connected": true, "windowCount": snapshot.windows.count]
-            case .failure(let status): report[id.rawValue] = ["connected": false, "status": status]; ok = false
-            case .skipped: report[id.rawValue] = ["connected": false, "status": "Skipped"]; ok = false
+            case .reading(let snapshot): entry = ["connected": true, "windowCount": snapshot.windows.count]
+            case .failure(let status): entry = ["connected": false, "status": status]; ok = false
+            case .skipped: entry = ["connected": false, "status": "Skipped"]; ok = false
             }
+            if let account { entry["account"] = account }
+            report[id] = entry
         }
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
             FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data([10]))
