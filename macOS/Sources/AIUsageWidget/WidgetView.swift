@@ -55,7 +55,6 @@ struct WidgetView: View {
                     }
                     Button("Connect Claude…") { model.refresh(manual: true, allowKeychainUI: true) }
                     Toggle("Renew Claude Sign-In Automatically", isOn: $model.renewClaude)
-                    Button("Claude Renewal Date…") { model.editClaudePlanDate() }
                     Button("Refresh Now") { model.refresh(manual: true) }.keyboardShortcut("r").disabled(model.refreshing)
                     Divider()
                     Button("Quit AI Usage Widget") { NSApp.terminate(nil) }.keyboardShortcut("q")
@@ -66,8 +65,10 @@ struct WidgetView: View {
 
             ForEach(model.sources) { source in
                 if source != model.sources.first { Divider().overlay(Color.white.opacity(0.05)) }
-                ProviderView(provider: source.provider, account: model.accountName(source), planDate: model.planDate(source),
-                             state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter)
+                ProviderView(provider: source.provider, account: model.accountName(source),
+                             state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter) {
+                    PlanDateSection(model: model, source: source)
+                }
             }
             HStack(spacing: 5) {
                 Image(systemName: model.topmost ? "pin.fill" : "desktopcomputer")
@@ -103,16 +104,20 @@ struct WidgetView: View {
     }
 }
 
-private struct ProviderView: View {
+private extension ProviderID {
+    var accent: Color { self == .claude ? Color(red: 0.91, green: 0.58, blue: 0.43) : Color(red: 0.37, green: 0.81, blue: 0.77) }
+}
+
+private struct ProviderView<PlanDate: View>: View {
     let provider: ProviderID
     /// The signed-in email for ChatGPT/Codex accounts, so several subscriptions can be told apart.
     let account: String?
-    /// When the subscription renews or ends, and the hover text explaining where the date comes from.
-    let planDate: (text: String, help: String)?
     let state: ServiceState
     let now: Date
     let staleAfter: TimeInterval
-    private var accent: Color { provider == .claude ? Color(red: 0.91, green: 0.58, blue: 0.43) : Color(red: 0.37, green: 0.81, blue: 0.77) }
+    /// When the subscription renews or ends, editable in place.
+    @ViewBuilder let planDate: PlanDate
+    private var accent: Color { provider.accent }
     private var primary: UsageWindow? { state.snapshot?.primary }
     private var stale: Bool { state.stale(at: now, after: staleAfter) }
     var body: some View {
@@ -163,10 +168,7 @@ private struct ProviderView: View {
                 Text(status).font(.system(size: 10)).foregroundStyle(.orange.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            if let planDate {
-                Text(planDate.text).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                    .help(planDate.help).padding(.top, 2)
-            }
+            planDate.padding(.top, 2)
             Text(UsageFormatting.age(state.snapshot?.updatedAt, now: now))
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }.accessibilityElement(children: .contain).accessibilityLabel(account.map { "\(provider.title) usage for \($0)" } ?? provider.title + " usage")
@@ -185,6 +187,193 @@ private struct ProviderView: View {
     private func resetHelp(_ window: UsageWindow) -> String {
         guard let reset = window.resetsAt else { return "The provider has not supplied a reset time." }
         return "Resets " + reset.formatted(date: .complete, time: .standard)
+    }
+}
+
+/// The renewal or end date under a subscription. Clicking it opens a calendar in place.
+private struct PlanDateSection: View {
+    @ObservedObject var model: UsageModel
+    let source: UsageSource
+    @State private var hovering = false
+    private var editing: Bool { model.editingPlanDate == source.id }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let line = model.planDate(source) {
+                Button(action: toggle) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar").font(.system(size: 9, weight: .semibold))
+                        Text(line.text).lineLimit(1)
+                        Image(systemName: editing ? "chevron.up" : "pencil").font(.system(size: 8, weight: .semibold))
+                            .opacity(hovering || editing ? 0.9 : 0)
+                    }.font(.system(size: 10)).foregroundStyle(line.lapsed ? Color.orange.opacity(0.9) : Color.secondary)
+                        .contentShape(Rectangle())
+                }.help(line.help).accessibilityLabel(line.text).accessibilityHint("Edit the renewal date")
+            } else if model.canAddPlanDate(source) {
+                Button(action: toggle) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar.badge.plus").font(.system(size: 9, weight: .semibold))
+                        Text("Add renewal date")
+                    }.font(.system(size: 10)).foregroundStyle(hovering || editing ? .secondary : .tertiary)
+                        .contentShape(Rectangle())
+                }.help(source.provider == .claude
+                       ? "Claude's sign-in doesn't report when the subscription renews. Add the date from claude.ai → Settings → Billing."
+                       : "Add when this subscription renews or ends.")
+            }
+            if editing {
+                PlanDateEditor(accent: source.provider.accent, existing: model.planDates[source.id],
+                               reported: model.reportedPlanDate(source), now: model.now,
+                               save: { model.setPlanDate(source, $0) }, cancel: { model.editingPlanDate = nil })
+            }
+        }.buttonStyle(.plain).onHover { hovering = $0 }
+    }
+    private func toggle() { model.editingPlanDate = editing ? nil : source.id }
+}
+
+/// A compact month calendar with the renewal cycle, styled to match the panel.
+private struct PlanDateEditor: View {
+    let accent: Color
+    /// The date entered earlier, if any.
+    let existing: ManualPlanDate?
+    /// ChatGPT's paid-period end, which removing the entry falls back to.
+    let reported: Date?
+    let now: Date
+    let save: (ManualPlanDate?) -> Void
+    let cancel: () -> Void
+    @State private var day: Date
+    @State private var month: Date
+    @State private var cycle: ManualPlanDate.Cycle
+    private let calendar = Calendar.current
+
+    init(accent: Color, existing: ManualPlanDate?, reported: Date?, now: Date,
+         save: @escaping (ManualPlanDate?) -> Void, cancel: @escaping () -> Void) {
+        self.accent = accent; self.existing = existing; self.reported = reported; self.now = now
+        self.save = save; self.cancel = cancel
+        let start = Calendar.current.startOfDay(for: existing?.upcoming(now: now) ?? reported ?? now)
+        _day = State(initialValue: start); _month = State(initialValue: start)
+        _cycle = State(initialValue: existing?.cycle ?? .monthly)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            cyclePicker
+            VStack(spacing: 6) {
+                monthHeader
+                weekGrid
+            }
+            Text(caption).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 8) {
+                if existing != nil {
+                    Button(reported == nil ? "Remove" : "Use ChatGPT's Date") { save(nil) }
+                        .foregroundStyle(.secondary)
+                        .help(reported == nil ? "Stop showing a renewal date" : "Show the date ChatGPT reports again")
+                }
+                Spacer(minLength: 0)
+                Button("Cancel", action: cancel).foregroundStyle(.secondary)
+                Button { save(ManualPlanDate(date: day, cycle: cycle)) } label: {
+                    Text("Save").fontWeight(.semibold).foregroundStyle(.black.opacity(0.85))
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(Capsule().fill(accent))
+                }
+            }.font(.system(size: 11))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.045)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .buttonStyle(.plain)
+    }
+
+    /// What saving will show, for example "Renews on the 26th of every month · next 26 Dec".
+    private var caption: String {
+        let text = UsageFormatting.day(day, now: now, calendar: calendar)
+        let next = ManualPlanDate(date: day, cycle: cycle).upcoming(now: now, calendar: calendar)
+        let later = next == day ? "" : " · next " + UsageFormatting.day(next, now: now, calendar: calendar)
+        switch cycle {
+        case .monthly:
+            let format = NumberFormatter(); format.numberStyle = .ordinal
+            let ordinal = format.string(from: NSNumber(value: calendar.component(.day, from: day))) ?? text
+            return "Renews on the \(ordinal) of every month" + later
+        case .yearly: return "Renews every year on " + day.formatted(.dateTime.day().month(.abbreviated)) + later
+        case .ends: return (day < calendar.startOfDay(for: now) ? "Cancelled: ended " : "Cancelled: ends ") + text
+        }
+    }
+
+    private var cyclePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(ManualPlanDate.Cycle.allCases, id: \.self) { option in
+                Button { cycle = option } label: {
+                    Text(option.title).font(.system(size: 10, weight: cycle == option ? .semibold : .regular))
+                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                        .foregroundStyle(cycle == option ? Color.primary : Color.secondary)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(cycle == option ? Color.white.opacity(0.14) : .clear))
+                        .contentShape(Rectangle())
+                }.help(option.explanation).accessibilityAddTraits(cycle == option ? .isSelected : [])
+            }
+        }.padding(2).background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.25)))
+    }
+
+    private var monthHeader: some View {
+        HStack {
+            Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 22, height: 18).contentShape(Rectangle()) }
+                .accessibilityLabel("Previous month")
+            Spacer()
+            Button { month = day } label: {
+                Text(month.formatted(.dateTime.month(.wide).year())).font(.system(size: 11, weight: .semibold))
+            }.help("Go to the selected day")
+            Spacer()
+            Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 22, height: 18).contentShape(Rectangle()) }
+                .accessibilityLabel("Next month")
+        }.font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+    }
+    private func step(_ months: Int) { month = calendar.date(byAdding: .month, value: months, to: month) ?? month }
+
+    private var weekGrid: some View {
+        let cells = MonthGrid.days(of: month, calendar: calendar)
+        let today = calendar.startOfDay(for: now)
+        let repeatDay = renewal(in: month)
+        return VStack(spacing: 2) {
+            HStack(spacing: 0) {
+                ForEach(Array(MonthGrid.weekdaySymbols(calendar: calendar).enumerated()), id: \.offset) { _, symbol in
+                    Text(symbol).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                }
+            }
+            ForEach(0..<cells.count / 7, id: \.self) { row in
+                HStack(spacing: 0) {
+                    ForEach(0..<7, id: \.self) { column in
+                        if let date = cells[row * 7 + column] {
+                            dayCell(date, today: today, repeats: date == repeatDay)
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity).frame(height: 24)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private func dayCell(_ date: Date, today: Date, repeats: Bool) -> some View {
+        let selected = calendar.isDate(date, inSameDayAs: day)
+        return Button { day = date } label: {
+            Text("\(calendar.component(.day, from: date))")
+                .font(.system(size: 11, weight: selected ? .bold : .regular)).monospacedDigit()
+                .foregroundStyle(selected ? Color.black.opacity(0.85) : date < today ? Color.secondary : Color.primary)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(selected ? accent : .clear))
+                .overlay(Circle().strokeBorder(date == today && !selected ? Color.white.opacity(0.35) : .clear, lineWidth: 1))
+                .overlay(alignment: .bottom) {
+                    if repeats { Circle().fill(accent).frame(width: 3, height: 3).offset(y: -1) }
+                }
+                .frame(maxWidth: .infinity).contentShape(Rectangle())
+        }.help(date.formatted(date: .complete, time: .omitted) + (repeats ? " · renews" : ""))
+            .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    /// Where the chosen day repeats in the shown month, so a monthly or yearly cycle is visible at a glance.
+    private func renewal(in month: Date) -> Date? {
+        guard cycle != .ends,
+              let from = calendar.dateInterval(of: .month, for: day)?.start,
+              let to = calendar.dateInterval(of: .month, for: month)?.start,
+              let months = calendar.dateComponents([.month], from: from, to: to).month, months > 0,
+              cycle == .monthly || months % 12 == 0 else { return nil }
+        return calendar.date(byAdding: .month, value: months, to: day)
     }
 }
 
