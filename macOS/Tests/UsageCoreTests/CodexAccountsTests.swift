@@ -16,14 +16,16 @@ final class CodexAccountsTests: XCTestCase {
     }
     /// A Codex home whose auth.json carries an unsigned ID token with the given claims.
     @discardableResult
-    private func home(_ name: String, email: String?, plan: String = "plus", account: String) throws -> URL {
+    private func home(_ name: String, email: String?, plan: String = "plus", account: String, until: String? = nil) throws -> URL {
         let directory = root.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var claims: [String: Any] = ["https://api.openai.com/auth": ["chatgpt_plan_type": plan, "chatgpt_account_id": account]]
+        var auth: [String: Any] = ["chatgpt_plan_type": plan, "chatgpt_account_id": account]
+        if let until { auth["chatgpt_subscription_active_until"] = until }
+        var claims: [String: Any] = ["https://api.openai.com/auth": auth]
         if let email { claims["email"] = email }
         let token = "e30." + (try base64URL(claims)) + ".sig"
-        let auth: [String: Any] = ["auth_mode": "chatgpt", "tokens": ["id_token": token, "access_token": "secret", "refresh_token": "secret"]]
-        try JSONSerialization.data(withJSONObject: auth).write(to: directory.appendingPathComponent("auth.json"))
+        let file: [String: Any] = ["auth_mode": "chatgpt", "tokens": ["id_token": token, "access_token": "secret", "refresh_token": "secret"]]
+        try JSONSerialization.data(withJSONObject: file).write(to: directory.appendingPathComponent("auth.json"))
         return directory
     }
     private func routerState(_ homes: [URL]) throws -> URL {
@@ -39,6 +41,55 @@ final class CodexAccountsTests: XCTestCase {
         XCTAssertEqual(identity, .init(email: "main@example.com", plan: "plus", accountID: "acct-main"))
         XCTAssertNil(CodexAccounts.identity(authData: Data(#"{"OPENAI_API_KEY":"sk-test"}"#.utf8)))
         XCTAssertNil(CodexAccounts.identity(home: root.appendingPathComponent("missing")))
+    }
+
+    func testPaidPeriodEndIsReadForEachAccount() throws {
+        let main = try home("main", email: "main@example.com", account: "acct-main", until: "2026-11-17T10:25:07+00:00")
+        let second = try home("router-second", email: "second@example.com", account: "acct-second", until: "2026-10-28T05:23:28.123456+00:00")
+        let none = try home("router-none", email: "none@example.com", account: "acct-none")
+        let accounts = CodexAccounts.discover(mainHome: main, routerState: try routerState([second, none]), folders: [])
+        XCTAssertEqual(accounts.map { $0.paidUntil?.timeIntervalSince1970.rounded() },
+                       [1_794_911_107, 1_793_165_008, nil])
+    }
+
+    func testPaidPeriodLabelSaysRenewsOrEnds() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let end = Date(timeIntervalSince1970: 1_794_911_107) // 17 Nov 2026
+        XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-86_400), calendar: calendar).hasPrefix("Renews or ends "))
+        XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(86_400), calendar: calendar).hasPrefix("Paid period ended "))
+        // The year is shown only when it isn't the current one.
+        XCTAssertFalse(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-90 * 86_400), calendar: calendar).contains("2026"))
+        XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-365 * 86_400), calendar: calendar).contains("2026"))
+    }
+
+    func testManualClaudeDateRollsForwardUnlessItEnds() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        func day(_ y: Int, _ m: Int, _ d: Int, hour: Int = 0) -> Date {
+            calendar.date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
+        }
+        let monthly = ManualPlanDate(date: day(2026, 1, 31), cycle: .monthly)
+        // Short months fall back to their last day; later months keep the 31st.
+        XCTAssertEqual(monthly.upcoming(now: day(2026, 2, 10), calendar: calendar), day(2026, 2, 28))
+        XCTAssertEqual(monthly.upcoming(now: day(2026, 3, 1), calendar: calendar), day(2026, 3, 31))
+        XCTAssertEqual(monthly.upcoming(now: day(2026, 11, 5, hour: 20), calendar: calendar), day(2026, 11, 30))
+        // On the renewal day itself it still shows that day.
+        XCTAssertEqual(monthly.upcoming(now: day(2026, 3, 31, hour: 23), calendar: calendar), day(2026, 3, 31))
+        // A future date is kept as entered.
+        XCTAssertEqual(monthly.upcoming(now: day(2025, 12, 1), calendar: calendar), day(2026, 1, 31))
+
+        let yearly = ManualPlanDate(date: day(2024, 6, 26), cycle: .yearly)
+        XCTAssertEqual(yearly.upcoming(now: day(2026, 11, 5), calendar: calendar), day(2027, 6, 26))
+        XCTAssertTrue(yearly.label(now: day(2026, 11, 5), calendar: calendar).hasPrefix("Renews "))
+
+        let ends = ManualPlanDate(date: day(2026, 11, 26), cycle: .ends)
+        XCTAssertEqual(ends.upcoming(now: day(2026, 12, 30), calendar: calendar), day(2026, 11, 26))
+        XCTAssertTrue(ends.label(now: day(2026, 11, 5), calendar: calendar).hasPrefix("Ends "))
+        XCTAssertTrue(ends.label(now: day(2026, 11, 27), calendar: calendar).hasPrefix("Ended "))
+        // Saved settings decode back to the same date.
+        let data = try! JSONEncoder().encode(yearly)
+        XCTAssertEqual(try! JSONDecoder().decode(ManualPlanDate.self, from: data), yearly)
     }
 
     func testRouterAccountsAreAddedOnceAndPlaceholdersSkipped() throws {
