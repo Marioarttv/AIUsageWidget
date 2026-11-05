@@ -138,8 +138,6 @@ final class UsageModel: ObservableObject {
     /// and ChatGPT's doesn't say whether the plan was cancelled.
     @Published private(set) var planDates = ManualPlanDate.decodeAll(UserDefaults.standard.data(forKey: "planDates"),
                                                                      legacyClaude: UserDefaults.standard.data(forKey: "claudePlanDate"))
-    /// The subscription whose renewal date is being edited in the panel.
-    @Published var editingPlanDate: String?
 
     struct PlanDateLine {
         let text: String
@@ -161,9 +159,12 @@ final class UsageModel: ObservableObject {
                                 lapsed: entry.cycle == .ends && entry.upcoming(now: now) < Calendar.current.startOfDay(for: now))
         }
         guard let end = reportedPlanDate(source) else { return nil }
-        return PlanDateLine(text: UsageFormatting.paidPeriod(end, now: now),
-                            help: "ChatGPT reports this plan paid through " + end.formatted(date: .complete, time: .shortened)
-                            + ". It renews then unless the subscription was cancelled. Click to set whether it renews or ends.",
+        let through = end.formatted(date: .complete, time: .shortened)
+        let help = end > now
+            ? "ChatGPT reports this plan paid through \(through). It renews then unless the subscription was cancelled."
+            : "ChatGPT last reported this plan paid through \(through) and hasn't recorded a renewal yet. "
+                + "The date updates when Codex renews the sign-in."
+        return PlanDateLine(text: UsageFormatting.paidPeriod(end, now: now), help: help + " Click to set whether it renews or ends.",
                             lapsed: end <= now)
     }
     /// The paid-period end recorded in a ChatGPT sign-in.
@@ -179,7 +180,6 @@ final class UsageModel: ObservableObject {
         planDates[source.id] = entry
         if let data = try? JSONEncoder().encode(planDates) { UserDefaults.standard.set(data, forKey: "planDates") }
         UserDefaults.standard.removeObject(forKey: "claudePlanDate")
-        editingPlanDate = nil
         onUpdate?()
     }
     func title(_ source: UsageSource) -> String {

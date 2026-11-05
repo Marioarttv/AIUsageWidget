@@ -132,7 +132,7 @@ public enum UsageFormatting {
     /// The end of a paid ChatGPT period. The sign-in doesn't say whether the plan will renew or was cancelled.
     public static func paidPeriod(_ end: Date, now: Date, calendar: Calendar = .current) -> String {
         let text = day(end, now: now, calendar: calendar)
-        return end > now ? "Renews or ends " + text : "Paid period ended " + text + " · awaiting renewal check"
+        return end > now ? "Renews or ends " + text : "Paid until " + text
     }
     /// "17 Nov", with the year only when it isn't the current one.
     public static func day(_ date: Date, now: Date, calendar: Calendar = .current) -> String {

@@ -168,9 +168,13 @@ private struct ProviderView<PlanDate: View>: View {
                 Text(status).font(.system(size: 10)).foregroundStyle(.orange.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            planDate.padding(.top, 2)
-            Text(UsageFormatting.age(state.snapshot?.updatedAt, now: now))
-                .font(.system(size: 9)).foregroundStyle(.tertiary)
+            // The renewal date shares the last line with the reading's age, so it adds no height.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                planDate
+                Spacer(minLength: 0)
+                Text(UsageFormatting.age(state.snapshot?.updatedAt, now: now))
+                    .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1).layoutPriority(1)
+            }
         }.accessibilityElement(children: .contain).accessibilityLabel(account.map { "\(provider.title) usage for \($0)" } ?? provider.title + " usage")
     }
     private func quotaBar(_ window: UsageWindow, height: CGFloat) -> some View {
@@ -190,46 +194,127 @@ private struct ProviderView<PlanDate: View>: View {
     }
 }
 
-/// The renewal or end date under a subscription. Clicking it opens a calendar in place.
+/// The renewal or end date at the foot of a subscription. Clicking it opens a calendar in a floating card
+/// under the date, so editing never makes the panel taller.
 private struct PlanDateSection: View {
     @ObservedObject var model: UsageModel
     let source: UsageSource
+    @ObservedObject private var editor = PlanDatePanel.shared
     @State private var hovering = false
-    private var editing: Bool { model.editingPlanDate == source.id }
+    @State private var anchor = ScreenAnchor.Box()
+    private var editing: Bool { editor.openSource == source.id && editor.anchorWindow === anchor.view?.window }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let line = model.planDate(source) {
-                Button(action: toggle) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "calendar").font(.system(size: 9, weight: .semibold))
-                        Text(line.text).lineLimit(1)
-                        Image(systemName: editing ? "chevron.up" : "pencil").font(.system(size: 8, weight: .semibold))
-                            .opacity(hovering || editing ? 0.9 : 0)
-                    }.font(.system(size: 10)).foregroundStyle(line.lapsed ? Color.orange.opacity(0.9) : Color.secondary)
-                        .contentShape(Rectangle())
-                }.help(line.help).accessibilityLabel(line.text).accessibilityHint("Edit the renewal date")
-            } else if model.canAddPlanDate(source) {
-                Button(action: toggle) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "calendar.badge.plus").font(.system(size: 9, weight: .semibold))
-                        Text("Add renewal date")
-                    }.font(.system(size: 10)).foregroundStyle(hovering || editing ? .secondary : .tertiary)
-                        .contentShape(Rectangle())
-                }.help(source.provider == .claude
-                       ? "Claude's sign-in doesn't report when the subscription renews. Add the date from claude.ai → Settings → Billing."
-                       : "Add when this subscription renews or ends.")
-            }
-            if editing {
-                PlanDateEditor(accent: source.provider.accent, existing: model.planDates[source.id],
-                               reported: model.reportedPlanDate(source), now: model.now,
-                               save: { model.setPlanDate(source, $0) }, cancel: { model.editingPlanDate = nil })
-            }
-        }.buttonStyle(.plain).onHover { hovering = $0 }
+        if let line = model.planDate(source) {
+            chip(icon: "calendar", text: line.text,
+                 color: line.lapsed ? Color.orange.opacity(0.9) : hovering || editing ? Color.primary : Color.secondary)
+                .help(line.help).accessibilityLabel(line.text).accessibilityHint("Edit the renewal date")
+        } else if model.canAddPlanDate(source) {
+            chip(icon: "calendar.badge.plus", text: "Renewal date",
+                 color: hovering || editing ? Color.secondary : Color(white: 1, opacity: 0.32))
+                .help(source.provider == .claude
+                      ? "Claude's sign-in doesn't report when the subscription renews. Add the date from claude.ai → Settings → Billing."
+                      : "Add when this subscription renews or ends.")
+        }
     }
-    private func toggle() { model.editingPlanDate = editing ? nil : source.id }
+    private func chip(icon: String, text: String, color: Color) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 9, weight: .semibold))
+                Text(text).lineLimit(1).truncationMode(.tail)
+            }
+            .font(.system(size: 10)).foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(Color.white.opacity(hovering || editing ? 0.1 : 0.05)))
+            .contentShape(Capsule())
+        }.buttonStyle(.plain).onHover { hovering = $0 }
+            .background(ScreenAnchor(box: anchor))
+            // Line up the chip's text with the card's left edge.
+            .padding(.leading, -6)
+    }
+    private func toggle() {
+        if editing { editor.close(); return }
+        guard let view = anchor.view else { return }
+        let model = model, source = source
+        editor.open(source: source.id, anchor: view,
+                    PlanDateEditor(accent: source.provider.accent, existing: model.planDates[source.id],
+                                   reported: model.reportedPlanDate(source), now: model.now,
+                                   save: { model.setPlanDate(source, $0); PlanDatePanel.shared.close() },
+                                   cancel: { PlanDatePanel.shared.close() }))
+    }
 }
 
-/// A compact month calendar with the renewal cycle, styled to match the panel.
+/// Finds the AppKit view behind a SwiftUI view, to place the calendar next to it on screen.
+private struct ScreenAnchor: NSViewRepresentable {
+    final class Box { weak var view: NSView? }
+    let box: Box
+    func makeNSView(context: Context) -> NSView { let view = NSView(); box.view = view; return view }
+    func updateNSView(_ nsView: NSView, context: Context) { box.view = nsView }
+}
+
+/// The floating card that holds the renewal calendar. It sits above the panel and the menu-bar popover,
+/// takes clicks without becoming key (like the panel), and closes on Save, Cancel, or a click elsewhere.
+@MainActor
+final class PlanDatePanel: ObservableObject {
+    static let shared = PlanDatePanel()
+    @Published private(set) var openSource: String?
+    private(set) weak var anchorWindow: NSWindow?
+    private var panel: WidgetPanel?
+    private var monitors: [Any] = []
+    /// Lets the menu-bar popover stay open while its calendar is in use.
+    var onOpen: ((NSWindow) -> Void)?
+    var onClose: (() -> Void)?
+
+    func open<Content: View>(source: String, anchor: NSView, _ content: Content) {
+        close()
+        guard let window = anchor.window else { return }
+        let card = content
+            .background(Color(red: 0.085, green: 0.104, blue: 0.13))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+            .preferredColorScheme(.dark)
+        let hosting = NSHostingView(rootView: card)
+        let size = hosting.fittingSize
+        let chip = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        let area = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        // Below the date when it fits, otherwise above it; kept on the display.
+        var origin = NSPoint(x: chip.minX - 6, y: chip.minY - 6 - size.height)
+        if origin.y < area.minY + 8 { origin.y = chip.maxY + 6 }
+        origin.x = max(area.minX + 8, min(origin.x, area.maxX - size.width - 8))
+        origin.y = max(area.minY + 8, min(origin.y, area.maxY - size.height - 8))
+        let panel = WidgetPanel(contentRect: NSRect(origin: origin, size: size), styleMask: [.borderless, .nonactivatingPanel],
+                                backing: .buffered, defer: false)
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false; panel.animationBehavior = .utilityWindow
+        // Above the menu-bar popover, which the calendar can open from.
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.contentView = hosting
+        panel.orderFrontRegardless()
+        self.panel = panel; anchorWindow = window; openSource = source
+        onOpen?(window)
+        let events: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        // Clicks in other apps close it; so do clicks in the widget outside the card, except on the date itself,
+        // whose button then closes it.
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] _ in
+            Task { @MainActor in self?.close() }
+        }) { monitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self, weak anchor] event in
+            guard let self, event.window !== self.panel else { return event }
+            let onChip = anchor.map { $0.window === event.window && $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } ?? false
+            if !onChip { self.close() }
+            return event
+        }) { monitors.append(local) }
+    }
+
+    func close() {
+        monitors.forEach(NSEvent.removeMonitor); monitors = []
+        panel?.orderOut(nil); panel = nil
+        anchorWindow = nil
+        if openSource != nil { openSource = nil; onClose?() }
+    }
+}
+
+/// A compact month calendar with the renewal cycle, shown in a floating card.
 private struct PlanDateEditor: View {
     let accent: Color
     /// The date entered earlier, if any.
@@ -276,9 +361,8 @@ private struct PlanDateEditor: View {
                 }
             }.font(.system(size: 11))
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.045)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .padding(12)
+        .frame(width: 252)
         .buttonStyle(.plain)
     }
 
