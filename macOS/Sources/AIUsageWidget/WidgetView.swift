@@ -55,6 +55,7 @@ struct WidgetView: View {
                     }
                     Button("Connect Claude…") { model.refresh(manual: true, allowKeychainUI: true) }
                     Toggle("Renew Claude Sign-In Automatically", isOn: $model.renewClaude)
+                    Button("Claude Renewal Date…") { model.editClaudePlanDate() }
                     Button("Refresh Now") { model.refresh(manual: true) }.keyboardShortcut("r").disabled(model.refreshing)
                     Divider()
                     Button("Quit AI Usage Widget") { NSApp.terminate(nil) }.keyboardShortcut("q")
@@ -65,7 +66,7 @@ struct WidgetView: View {
 
             ForEach(model.sources) { source in
                 if source != model.sources.first { Divider().overlay(Color.white.opacity(0.05)) }
-                ProviderView(provider: source.provider, account: model.accountName(source),
+                ProviderView(provider: source.provider, account: model.accountName(source), planDate: model.planDate(source),
                              state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter)
             }
             HStack(spacing: 5) {
@@ -106,6 +107,8 @@ private struct ProviderView: View {
     let provider: ProviderID
     /// The signed-in email for ChatGPT/Codex accounts, so several subscriptions can be told apart.
     let account: String?
+    /// When the subscription renews or ends, and the hover text explaining where the date comes from.
+    let planDate: (text: String, help: String)?
     let state: ServiceState
     let now: Date
     let staleAfter: TimeInterval
@@ -159,6 +162,10 @@ private struct ProviderView: View {
             if let status = state.status {
                 Text(status).font(.system(size: 10)).foregroundStyle(.orange.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
+            }
+            if let planDate {
+                Text(planDate.text).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    .help(planDate.help).padding(.top, 2)
             }
             Text(UsageFormatting.age(state.snapshot?.updatedAt, now: now))
                 .font(.system(size: 9)).foregroundStyle(.tertiary)

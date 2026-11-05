@@ -134,6 +134,65 @@ final class UsageModel: ObservableObject {
         guard source.provider == .codex, let account = codexAccounts.first(where: { $0.source == source }) else { return nil }
         return account.origin == .main ? account.email : account.name
     }
+    /// The renewal or end date entered for Claude, whose sign-in doesn't report one.
+    @Published private(set) var claudePlanDate: ManualPlanDate? = UserDefaults.standard.data(forKey: "claudePlanDate")
+        .flatMap { try? JSONDecoder().decode(ManualPlanDate.self, from: $0) }
+
+    /// The renewal line under a subscription and its hover text: entered by hand for Claude, from the sign-in for ChatGPT.
+    func planDate(_ source: UsageSource) -> (text: String, help: String)? {
+        if source.provider == .claude {
+            guard let entry = claudePlanDate else { return nil }
+            let next = entry.upcoming(now: now).formatted(date: .complete, time: .omitted)
+            let help: String
+            switch entry.cycle {
+            case .monthly, .yearly: help = "Entered by hand: renews \(entry.cycle.rawValue) on \(next). Change it in ⋯ → Claude Renewal Date…"
+            case .ends: help = "Entered by hand: the plan ends on \(next). Change it in ⋯ → Claude Renewal Date…"
+            }
+            return (entry.label(now: now), help)
+        }
+        guard let end = codexAccounts.first(where: { $0.source == source })?.paidUntil else { return nil }
+        return (UsageFormatting.paidPeriod(end, now: now),
+                "ChatGPT reports this plan paid through " + end.formatted(date: .complete, time: .shortened)
+                + ". It renews then unless the subscription was cancelled. The date updates when Codex renews the sign-in.")
+    }
+
+    /// Asks for Claude's renewal or end date, since Claude's sign-in doesn't expose billing.
+    func editClaudePlanDate() {
+        let alert = NSAlert()
+        alert.messageText = "Claude Renewal Date"
+        alert.informativeText = "Claude's sign-in doesn't report when the subscription renews. Enter the date from claude.ai → Settings → Billing."
+        let picker = NSDatePicker()
+        picker.datePickerStyle = .textFieldAndStepper
+        picker.datePickerElements = .yearMonthDay
+        picker.dateValue = claudePlanDate?.upcoming(now: Date()) ?? Date()
+        picker.sizeToFit()
+        let cycle = NSPopUpButton(frame: .zero, pullsDown: false)
+        cycle.addItems(withTitles: ManualPlanDate.Cycle.allCases.map(\.title))
+        cycle.selectItem(at: ManualPlanDate.Cycle.allCases.firstIndex(of: claudePlanDate?.cycle ?? .monthly) ?? 0)
+        cycle.sizeToFit()
+        let stack = NSStackView(views: [picker, cycle])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 260, height: picker.frame.height + cycle.frame.height + 8)
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        if claudePlanDate != nil { alert.addButton(withTitle: "Remove Date") }
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            setClaudePlanDate(ManualPlanDate(date: Calendar.current.startOfDay(for: picker.dateValue),
+                                             cycle: ManualPlanDate.Cycle.allCases[max(0, cycle.indexOfSelectedItem)]))
+        case .alertThirdButtonReturn: setClaudePlanDate(nil)
+        default: break
+        }
+    }
+
+    private func setClaudePlanDate(_ entry: ManualPlanDate?) {
+        claudePlanDate = entry
+        if let entry, let data = try? JSONEncoder().encode(entry) { UserDefaults.standard.set(data, forKey: "claudePlanDate") }
+        else { UserDefaults.standard.removeObject(forKey: "claudePlanDate") }
+        onUpdate?()
+    }
     func title(_ source: UsageSource) -> String {
         accountName(source).map { source.provider.title + " · " + $0 } ?? source.provider.title
     }
