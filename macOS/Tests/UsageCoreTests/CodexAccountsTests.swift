@@ -92,6 +92,33 @@ final class CodexAccountsTests: XCTestCase {
         XCTAssertEqual(try! JSONDecoder().decode(ManualPlanDate.self, from: data), yearly)
     }
 
+    func testEarlierClaudeDateMovesIntoPerSubscriptionDates() throws {
+        let claude = ManualPlanDate(date: Date(timeIntervalSince1970: 1_800_000_000), cycle: .monthly)
+        let legacy = try JSONEncoder().encode(claude)
+        XCTAssertEqual(ManualPlanDate.decodeAll(nil, legacyClaude: legacy), ["claude": claude])
+        // A newer entry wins over the earlier setting.
+        let ends = ManualPlanDate(date: claude.date, cycle: .ends)
+        let saved = try JSONEncoder().encode(["claude": ends, "codex@acct": claude])
+        XCTAssertEqual(ManualPlanDate.decodeAll(saved, legacyClaude: legacy), ["claude": ends, "codex@acct": claude])
+        XCTAssertEqual(ManualPlanDate.decodeAll(nil, legacyClaude: nil), [:])
+    }
+
+    func testMonthGridStartsOnTheFirstWeekdayAndKeepsSixRows() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.firstWeekday = 2 // Monday
+        // 1 November 2026 is a Sunday: six blank cells before it in a Monday-first week.
+        let november = calendar.date(from: DateComponents(year: 2026, month: 11, day: 17))!
+        let cells = MonthGrid.days(of: november, calendar: calendar)
+        XCTAssertEqual(cells.count, 42)
+        XCTAssertEqual(cells.prefix(6).compactMap { $0 }.count, 0)
+        XCTAssertEqual(cells[6], calendar.date(from: DateComponents(year: 2026, month: 11, day: 1)))
+        XCTAssertEqual(cells.compactMap { $0 }.count, 30)
+        XCTAssertEqual(MonthGrid.weekdaySymbols(calendar: calendar).first, calendar.veryShortStandaloneWeekdaySymbols[1])
+        calendar.firstWeekday = 1 // Sunday
+        XCTAssertEqual(MonthGrid.days(of: november, calendar: calendar).first, cells[6])
+    }
+
     func testRouterAccountsAreAddedOnceAndPlaceholdersSkipped() throws {
         let main = try home("main", email: "main@example.com", account: "acct-main")
         let routerPrimary = try home("router-primary", email: "main@example.com", account: "acct-main")
