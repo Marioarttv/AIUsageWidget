@@ -18,14 +18,15 @@ The build uses an existing Apple Development signing identity when available, wi
 - **Pin** switches to a floating panel above normal windows. Full-screen behavior depends on the active Space and macOS; system/security surfaces retain their own ordering.
 - **Drag the AI USAGE title** to reposition the panel. The position and display mode persist. Disconnecting a display brings an offscreen panel back onto an available display.
 - **The Claude and ChatGPT marks in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. With several ChatGPT accounts tracked, the ChatGPT mark is followed by one number per account, in panel order; hover over the menu-bar item to see which email each number belongs to. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
-- **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, ChatGPT account choices, Claude connection access, and automatic Claude sign-in renewal.
+- **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, ChatGPT account choices, Claude connection access, automatic Claude sign-in renewal, and the Claude renewal date.
+- **Claude Renewal Date…** in ⋯: Claude's sign-in doesn't report billing, so enter the date from claude.ai → Settings → Billing and choose *Renews monthly*, *Renews yearly*, or *Ends on this date (cancelled)*. The Claude section then shows “Renews 26 Nov” or “Ends 26 Nov”; a renewing date moves on to the next month or year by itself. **Remove Date** in the same dialog hides it. The date is kept only in the widget's settings.
 - **Refresh While Visible** (1–30 minutes, default 3) sets how often readings refresh while the panel or menu-bar view is on screen; the panel footer shows it. **Refresh While Hidden** (5–60 minutes, default 10) applies while the panel is hidden or fully covered; it is never shorter than the visible interval. Intervals under three minutes poll Claude's rate-limited usage endpoint more often and are more likely to meet its backoff.
 - **↻** refreshes manually. Requests still respect the provider's minimum interval and rate-limit backoff.
 - Hover over a reset time for the exact local date and time. Expired windows show “awaiting update” instead of inventing a full allowance. Failed readings retain visibly dimmed last-known data with an explanation.
 
 ## Multiple ChatGPT accounts
 
-The panel shows one Codex section per tracked ChatGPT account, labeled with the account's email and plan. Each account has its own readings, low-allowance alerts, and reset notifications; notification titles name the email when more than one account is tracked.
+The panel shows one Codex section per tracked ChatGPT account, labeled with the account's email and plan. Under each account, “Renews or ends 17 Nov” shows when the current paid period ends, as ChatGPT last recorded it in that sign-in; hover for the exact time. The sign-in doesn't say whether the plan was cancelled, so the date is when it either renews or ends, and it updates when Codex renews the sign-in. Each account has its own readings, low-allowance alerts, and reset notifications; notification titles name the email when more than one account is tracked.
 
 - **Main sign-in:** the Codex CLI's own sign-in (`CODEX_HOME` or `~/.codex`). It is always shown.
 - **Codex Subscription Router:** every signed-in account in `~/.codex-mux/state.json` is found automatically, including accounts disabled for routing. Router slots without a sign-in are skipped, and an account that matches one already listed appears once. Paid accounts are shown by default; free-plan accounts are listed but off until you turn them on.
@@ -33,7 +34,7 @@ The panel shows one Codex section per tracked ChatGPT account, labeled with the 
 
 Use the checkmarks in **⋯ → ChatGPT Accounts** to show or hide each account. New router sign-ins are picked up at the next refresh.
 
-Each extra account is read by starting the Codex CLI with `CODEX_HOME` set to that account's folder, exactly as for the main sign-in. To list accounts, the widget reads only the email, plan, and account ID from each `auth.json`; it never stores or logs tokens. The CLI may renew an account's sign-in as usual while reading it, as Codex Subscription Router does.
+Each extra account is read by starting the Codex CLI with `CODEX_HOME` set to that account's folder, exactly as for the main sign-in. To list accounts, the widget reads only the email, plan, account ID, and paid-period end from each `auth.json`; it never stores or logs tokens. The CLI may renew an account's sign-in as usual while reading it, as Codex Subscription Router does.
 
 ## Notifications
 

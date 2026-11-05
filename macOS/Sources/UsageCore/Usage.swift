@@ -129,6 +129,18 @@ public enum UsageFormatting {
         if minutes >= 60 { return "Resets in \(minutes / 60)h \(minutes % 60)m" }
         return "Resets in \(max(1, minutes))m"
     }
+    /// The end of a paid ChatGPT period. The sign-in doesn't say whether the plan will renew or was cancelled.
+    public static func paidPeriod(_ end: Date, now: Date, calendar: Calendar = .current) -> String {
+        let text = day(end, now: now, calendar: calendar)
+        return end > now ? "Renews or ends " + text : "Paid period ended " + text + " · awaiting renewal check"
+    }
+    /// "17 Nov", with the year only when it isn't the current one.
+    public static func day(_ date: Date, now: Date, calendar: Calendar = .current) -> String {
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        var style = Date.FormatStyle.dateTime.day().month(.abbreviated)
+        style.timeZone = calendar.timeZone
+        return date.formatted(sameYear ? style : style.year())
+    }
     public static func age(_ date: Date?, now: Date) -> String {
         guard let date else { return "Waiting for a reading" }
         let minutes = max(0, Int(now.timeIntervalSince(date) / 60))

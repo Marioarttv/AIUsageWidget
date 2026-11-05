@@ -30,6 +30,8 @@ public struct CodexAccount: Equatable, Identifiable {
     public let plan: String?
     public let accountID: String?
     public let origin: Origin
+    /// When the current paid ChatGPT period ends: the plan renews then, unless it was cancelled.
+    public var paidUntil: Date? = nil
     public var source: UsageSource { UsageSource(provider: .codex, account: key) }
     public var id: String { source.id }
     public var signedIn: Bool { email != nil || accountID != nil }
@@ -43,8 +45,9 @@ public struct CodexAccount: Equatable, Identifiable {
         return "Codex sign-in"
     }
 
-    public init(key: String?, home: String?, email: String?, plan: String?, accountID: String?, origin: Origin) {
+    public init(key: String?, home: String?, email: String?, plan: String?, accountID: String?, origin: Origin, paidUntil: Date? = nil) {
         self.key = key; self.home = home; self.email = email; self.plan = plan; self.accountID = accountID; self.origin = origin
+        self.paidUntil = paidUntil
     }
 }
 
@@ -53,6 +56,8 @@ public enum CodexAccounts {
         public let email: String?
         public let plan: String?
         public let accountID: String?
+        /// End of the current paid period, as ChatGPT last reported it in the sign-in.
+        public var paidUntil: Date? = nil
     }
 
     /// Reads only the identity claims of a sign-in. Tokens are never returned or kept.
@@ -79,8 +84,19 @@ public enum CodexAccounts {
         let auth = claims["https://api.openai.com/auth"] as? [String: Any] ?? [:]
         func text(_ value: Any?) -> String? { (value as? String).flatMap { $0.isEmpty ? nil : $0 } }
         let identity = Identity(email: text(claims["email"]), plan: text(auth["chatgpt_plan_type"]),
-                                accountID: text(auth["chatgpt_account_id"]) ?? text(tokens["account_id"]))
+                                accountID: text(auth["chatgpt_account_id"]) ?? text(tokens["account_id"]),
+                                paidUntil: date(auth["chatgpt_subscription_active_until"]))
         return identity.email == nil && identity.accountID == nil ? nil : identity
+    }
+
+    /// ChatGPT writes ISO 8601 times, sometimes with microseconds.
+    static func date(_ value: Any?) -> Date? {
+        guard let text = value as? String, !text.isEmpty else { return nil }
+        let format = ISO8601DateFormatter()
+        format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = format.date(from: text) { return date }
+        format.formatOptions = [.withInternetDateTime]
+        return format.date(from: text)
     }
 
     /// Codex homes listed in Codex Subscription Router's account state.
@@ -103,7 +119,8 @@ public enum CodexAccounts {
     public static func discover(mainHome: URL = defaultMainHome, routerState: URL = defaultRouterState,
                                 folders: [String]) -> [CodexAccount] {
         let main = identity(home: mainHome)
-        var accounts = [CodexAccount(key: nil, home: nil, email: main?.email, plan: main?.plan, accountID: main?.accountID, origin: .main)]
+        var accounts = [CodexAccount(key: nil, home: nil, email: main?.email, plan: main?.plan, accountID: main?.accountID, origin: .main,
+                                    paidUntil: main?.paidUntil)]
         var seenHomes: Set<String> = [mainHome.standardizedFileURL.path]
         func add(_ path: String, origin: CodexAccount.Origin) {
             let home = URL(fileURLWithPath: path).standardizedFileURL
@@ -113,7 +130,8 @@ public enum CodexAccounts {
             guard found != nil || origin == .folder else { return }
             if let id = found?.accountID, accounts.contains(where: { $0.accountID == id }) { return }
             accounts.append(CodexAccount(key: found?.accountID ?? home.path, home: home.path, email: found?.email,
-                                         plan: found?.plan, accountID: found?.accountID, origin: origin))
+                                         plan: found?.plan, accountID: found?.accountID, origin: origin,
+                                         paidUntil: found?.paidUntil))
         }
         for folder in folders { add(folder, origin: .folder) }
         if let state = try? Data(contentsOf: routerState) {
