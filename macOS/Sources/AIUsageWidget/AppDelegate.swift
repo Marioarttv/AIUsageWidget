@@ -57,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         model.onShow = { [weak self] in self?.reposition() }
         model.panelCovered = { [weak self] in self?.panelCovered() ?? false }
         model.notifications.onOpen = { [weak self] in self?.showPopover() }
+        // A transient popover would close when the calendar card, a separate window, is clicked.
+        PlanDatePanel.shared.onOpen = { [weak self] window in
+            guard let self, window === self.popover.contentViewController?.view.window else { return }
+            self.popover.behavior = .semitransient
+        }
+        PlanDatePanel.shared.onClose = { [weak self] in self?.popover.behavior = .transient }
         model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.updatePresentation() }
         }.store(in: &subscriptions)
@@ -98,7 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         panel.level = model.topmost ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         panel.collectionBehavior = model.topmost ? [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             : [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        if model.panelVisible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+        if model.panelVisible { panel.orderFrontRegardless() } else {
+            panel.orderOut(nil)
+            if PlanDatePanel.shared.anchorWindow === panel { PlanDatePanel.shared.close() }
+        }
     }
     private func restorePosition() {
         let defaults = UserDefaults.standard
@@ -177,7 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         model.popoverVisible = true
         Task { await model.updateNotificationStatus() }
     }
-    func popoverDidClose(_ notification: Notification) { model.popoverVisible = false }
+    func popoverDidClose(_ notification: Notification) {
+        model.popoverVisible = false
+        if PlanDatePanel.shared.anchorWindow === popover.contentViewController?.view.window { PlanDatePanel.shared.close() }
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showPopover(); return false }
     func applicationWillTerminate(_ notification: Notification) {
         positionSave?.cancel()
