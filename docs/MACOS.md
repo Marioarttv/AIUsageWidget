@@ -44,7 +44,7 @@ The panel shows an Antigravity section, and the menu bar a Gemini mark, once the
 
 - **Where the CLI is found:** `antigravity` or `agy` on PATH, in `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin`, then the copy T3 Code installs (`~/.t3/tools/antigravity-acp/…`, the active release only, once its install has finished). Only a native CLI binary qualifies, never the Antigravity editor's `antigravity` launcher or another script.
 - **How it is read:** at each refresh the widget runs `antigravity -p /usage --output-format json` once, in an empty private folder (`~/Library/Application Support/AIUsageWidget/antigravity-workspace`), with no model turn, update check, log file or listening port, and stops it after 35 seconds at most. The CLI owns the Google sign-in, which it keeps in the login Keychain (item `gemini`), and renews it as needed. The widget only checks that the item exists, reading its attributes, never the token.
-- **Signed out:** the CLI would open a browser to sign in. The widget runs it without a PATH, so it can't, and stops it as soon as it asks for a login. The section then says *Sign-in expired · Start an Antigravity session in T3 Code* (or *Run antigravity in Terminal*). Signing in there fixes it; the widget doesn't start the CLI again for that sign-in until it changes, you press ↻, or half an hour has passed.
+- **Signed out:** the CLI would open a browser to sign in. The widget runs it without a PATH, so it can't, and stops it as soon as it asks for a login. The section then says *Sign-in expired · Open Antigravity in T3 Code* (or *Run antigravity in Terminal*). Signing in there fixes it; the widget doesn't start the CLI again for that sign-in until it changes, you press ↻, or half an hour has passed.
 
 ## Notifications
 

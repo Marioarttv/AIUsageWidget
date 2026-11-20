@@ -37,10 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         panel.isMovableByWindowBackground = false
         panel.animationBehavior = .none
         panel.delegate = self
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Before the first layout, so the panel never opens taller than its display.
+        updateHeightLimits()
         hosting = NSHostingView(rootView: WidgetView(model: model))
         hosting.sizingOptions = [.intrinsicContentSize]
         panel.contentView = hosting
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.target = self; button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -130,16 +132,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             return (aa.isNull ? 0 : aa.width * aa.height) < (bb.isNull ? 0 : bb.width * bb.height)
         } ?? NSScreen.main
         guard let area = best?.visibleFrame else { return }
-        // The panel and the menu-bar view scroll their cards rather than run off a short display.
-        let menuBarArea = (statusItem?.button?.window?.screen ?? NSScreen.main)?.visibleFrame ?? area
-        let limit = min(area.height, menuBarArea.height) - 16
-        if abs(model.maxPanelHeight - limit) > 1 { model.maxPanelHeight = limit }
+        updateHeightLimits()
         let x = max(area.minX + 8, min(frame.minX, area.maxX - frame.width - 8))
         let y = max(area.minY + 8, min(frame.minY, area.maxY - frame.height - 8))
         if x != frame.minX || y != frame.minY { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
     }
+    /// The panel and the menu-bar view scroll their cards rather than run off a short display.
+    private func updateHeightLimits() {
+        let frame = panel.frame
+        let screen = NSScreen.screens.max { a, b in
+            let aa = a.visibleFrame.intersection(frame), bb = b.visibleFrame.intersection(frame)
+            return (aa.isNull ? 0 : aa.width * aa.height) < (bb.isNull ? 0 : bb.width * bb.height)
+        } ?? NSScreen.main
+        if let area = screen?.visibleFrame {
+            let limit = area.height - 16
+            if abs(model.maxPanelHeight - limit) > 1 { model.maxPanelHeight = limit }
+        }
+        // The popover hangs below the menu bar with its arrow, and keeps clear of the Dock.
+        if let area = (statusItem?.button?.window?.screen ?? NSScreen.main)?.visibleFrame {
+            let limit = area.height - 36
+            if abs(model.maxPopoverHeight - limit) > 1 { model.maxPopoverHeight = limit }
+        }
+    }
     func windowDidMove(_ notification: Notification) {
         guard !resizing else { return }
+        updateHeightLimits()
         positionSave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -149,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         positionSave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
-    @objc private func screensChanged() { clampToDisplay() }
+    @objc private func screensChanged() { updateHeightLimits(); clampToDisplay() }
     /// Whether one visible window above the panel contains it entirely. Uses window bounds only.
     private func panelCovered() -> Bool {
         guard panel.isVisible,

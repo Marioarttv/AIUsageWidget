@@ -10,7 +10,9 @@ struct WidgetView: View {
     /// The measured height of everything else: header, footer, message and padding.
     @State private var chromeHeight: CGFloat = 100
     /// Room for the cards on the display.
-    private var cardsLimit: CGFloat { max(240, model.maxPanelHeight - chromeHeight - 2) }
+    private var cardsLimit: CGFloat {
+        max(240, (inPopover ? model.maxPopoverHeight : model.maxPanelHeight) - chromeHeight - 2)
+    }
     private var scrolling: Bool { cardsHeight > cardsLimit }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -72,10 +74,20 @@ struct WidgetView: View {
                     .help("Widget settings").accessibilityLabel("Widget settings")
             }.font(.system(size: 12, weight: .medium)).buttonStyle(.plain)
 
-            if scrolling {
-                ScrollView(.vertical) { measuredCards }.frame(height: cardsLimit)
-            } else {
-                measuredCards
+            // Always the same scroll view, so the cards keep their state when scrolling starts or stops.
+            ScrollView(.vertical) {
+                cards.fixedSize(horizontal: false, vertical: true)
+                    .background(GeometryReader { Color.clear.preference(key: Heights.self, value: Heights(cards: $0.size.height)) })
+            }
+            .scrollDisabled(!scrolling)
+            .frame(height: min(cardsHeight, cardsLimit))
+            .background(GeometryReader { Color.clear.preference(key: Heights.self, value: Heights(slot: $0.size.height)) })
+            // Shows that more follows, since macOS hides scroll bars until scrolling.
+            .overlay(alignment: .bottom) {
+                if scrolling {
+                    LinearGradient(colors: [.clear, Self.background], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 18).allowsHitTesting(false)
+                }
             }
             HStack(spacing: 5) {
                 Image(systemName: model.topmost ? "pin.fill" : "desktopcomputer")
@@ -91,13 +103,18 @@ struct WidgetView: View {
             }
         }
         .padding(16)
-        .background(GeometryReader { Color.clear.preference(key: TotalHeight.self, value: $0.size.height) })
-        .onPreferenceChange(TotalHeight.self) { total in
-            let chrome = total - (scrolling ? cardsLimit : cardsHeight)
-            if chrome > 0, abs(chrome - chromeHeight) > 0.5 { chromeHeight = chrome }
+        .background(GeometryReader { Color.clear.preference(key: Heights.self, value: Heights(total: $0.size.height)) })
+        // All three heights come from the same layout pass, so the chrome is the total less the cards' slot.
+        .onPreferenceChange(Heights.self) { heights in
+            let chrome = heights.total - heights.slot
+            var changed = false
+            if abs(heights.cards - cardsHeight) > 0.5 { cardsHeight = heights.cards; changed = true }
+            if chrome > 0, abs(chrome - chromeHeight) > 0.5 { chromeHeight = chrome; changed = true }
+            // The window follows the view's size only when the model reports a change.
+            if changed { DispatchQueue.main.async { model.onUpdate?() } }
         }
         .frame(width: 300)
-        .background(Color(red: 0.065, green: 0.082, blue: 0.105))
+        .background(Self.background)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .preferredColorScheme(.dark)
@@ -115,16 +132,7 @@ struct WidgetView: View {
             }
         }
     }
-    private var measuredCards: some View {
-        cards.fixedSize(horizontal: false, vertical: true)
-            .background(GeometryReader { Color.clear.preference(key: CardsHeight.self, value: $0.size.height) })
-            .onPreferenceChange(CardsHeight.self) { height in
-                guard abs(height - cardsHeight) > 0.5 else { return }
-                cardsHeight = height
-                // The window follows the view's size only when the model reports a change.
-                DispatchQueue.main.async { model.onUpdate?() }
-            }
-    }
+    private static let background = Color(red: 0.065, green: 0.082, blue: 0.105)
 
     private func accountTitle(_ account: CodexAccount) -> String {
         var parts = [account.name]
@@ -138,13 +146,14 @@ struct WidgetView: View {
     }
 }
 
-private struct CardsHeight: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-private struct TotalHeight: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+/// The cards' natural height, the height of the slot they are shown in, and the whole view's.
+private struct Heights: PreferenceKey, Equatable {
+    var cards: CGFloat = 0, slot: CGFloat = 0, total: CGFloat = 0
+    static var defaultValue = Heights()
+    static func reduce(value: inout Heights, nextValue: () -> Heights) {
+        let next = nextValue()
+        value = Heights(cards: max(value.cards, next.cards), slot: max(value.slot, next.slot), total: max(value.total, next.total))
+    }
 }
 
 private extension ProviderID {
