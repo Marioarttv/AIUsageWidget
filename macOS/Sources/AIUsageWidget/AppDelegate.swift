@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             button.target = self; button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.imagePosition = .imageOnly
-            button.toolTip = "AI Usage · Claude and Codex remaining allowance\nClick for allowance and reset times."
+            button.toolTip = "AI Usage · Claude, Codex and Antigravity remaining allowance\nClick for allowance and reset times."
             button.setAccessibilityLabel("AI Usage Widget menu bar")
         }
         popover.behavior = .transient
@@ -76,13 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func updatePresentation() {
         guard panel != nil else { return }
-        let title = model.menuTitle
+        // The tooltip names each account, so it decides when to redraw too.
+        let title = model.menuDetails.joined(separator: "\n")
         if title != statusTitle, let button = statusItem.button {
             statusTitle = title
             let readings = model.menuReadings
             button.image = StatusIcon.image(readings)
-            button.setAccessibilityTitle(title)
-            button.toolTip = "AI Usage · remaining allowance\n" + readings.map { "\($0.name): \($0.value)" }.joined(separator: "\n")
+            button.setAccessibilityTitle(model.menuTitle)
+            button.toolTip = "AI Usage · remaining allowance\n" + model.menuDetails.joined(separator: "\n")
                 + "\nClick for allowance and reset times."
         }
         let height = ceil(hosting.fittingSize.height)
@@ -129,6 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             return (aa.isNull ? 0 : aa.width * aa.height) < (bb.isNull ? 0 : bb.width * bb.height)
         } ?? NSScreen.main
         guard let area = best?.visibleFrame else { return }
+        // The panel and the menu-bar view scroll their cards rather than run off a short display.
+        let menuBarArea = (statusItem?.button?.window?.screen ?? NSScreen.main)?.visibleFrame ?? area
+        let limit = min(area.height, menuBarArea.height) - 16
+        if abs(model.maxPanelHeight - limit) > 1 { model.maxPanelHeight = limit }
         let x = max(area.minX + 8, min(frame.minX, area.maxX - frame.width - 8))
         let y = max(area.minY + 8, min(frame.minY, area.maxY - frame.height - 8))
         if x != frame.minX || y != frame.minY { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
