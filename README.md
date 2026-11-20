@@ -12,9 +12,11 @@ The Mac app uses SwiftUI and AppKit, with a desktop panel, an always-on-top togg
 ./macOS/scripts/install.sh
 ```
 
-This builds, signs using an existing Apple Development identity when available, installs to `~/Applications/AI Usage Widget.app`, and opens the app. It starts in desktop mode. Drag its title to move it; click the pin to keep it above other windows. The menu bar shows the Claude and ChatGPT/Codex marks with each remaining allowance; click it for the complete widget and settings.
+This builds, signs using an existing Apple Development identity when available, installs to `~/Applications/AI Usage Widget.app`, and opens the app. It starts in desktop mode. Drag its title to move it; click the pin to keep it above other windows. The menu bar shows the Claude, ChatGPT/Codex and Antigravity (Gemini mark) allowance left, one number each; several ChatGPT accounts share one number, the average of what each has left. Click it for the complete widget and settings. When a weekly limit is used up, the shorter limits it covers show 0% too.
 
 To track more than one ChatGPT subscription, sign the extra account in to [Codex Subscription Router](https://github.com/b-nnett/codex-subscription-router); the widget finds it automatically and shows each account with its email. Choose which accounts to show in **⋯ → ChatGPT Accounts**, or add another Codex sign-in folder there. See [the Mac guide](docs/MACOS.md#multiple-chatgpt-accounts).
+
+[Antigravity](https://antigravity.google) appears automatically when its CLI is installed and signed in, for example the copy T3 Code installs for its Antigravity sessions. The widget runs its `/usage` command, which needs no model turn. See [the Mac guide](docs/MACOS.md#antigravity).
 
 Allow notifications when macOS asks. Claude connects automatically when Claude Code is signed in; if it still needs Keychain permission, choose **⋯ → Connect Claude…**. Enable **Launch at Login** in that menu if desired.
 

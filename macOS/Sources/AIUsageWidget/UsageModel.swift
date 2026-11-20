@@ -34,7 +34,7 @@ private struct RuntimeCache: Codable {
 final class UsageModel: ObservableObject {
     /// Readings keyed by `UsageSource.id`.
     @Published var services: [String: ServiceState] = [:]
-    /// Claude, then each tracked ChatGPT/Codex sign-in, in display order.
+    /// Claude, then each tracked ChatGPT/Codex sign-in, then Antigravity, in display order.
     @Published private(set) var sources: [UsageSource] = [.claude, .codex]
     /// Every ChatGPT/Codex sign-in found, tracked or not.
     @Published private(set) var codexAccounts: [CodexAccount] = []
@@ -52,6 +52,17 @@ final class UsageModel: ObservableObject {
     @Published var resetAlerts = UserDefaults.standard.object(forKey: "resetAlerts") as? Bool ?? true {
         didSet { UserDefaults.standard.set(resetAlerts, forKey: "resetAlerts") }
     }
+    /// Shows Antigravity whenever its CLI is installed.
+    @Published var showAntigravity = UserDefaults.standard.object(forKey: "showAntigravity") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showAntigravity, forKey: "showAntigravity")
+            applySources()
+            if showAntigravity { refresh(manual: true) }
+            onUpdate?()
+        }
+    }
+    /// Whether the Antigravity CLI was found at the last check.
+    @Published private(set) var antigravityInstalled = false
     /// Renews Claude Code's sign-in after it lapses, instead of waiting for Claude Code to be opened.
     @Published var renewClaude = UserDefaults.standard.object(forKey: "renewClaude") as? Bool ?? true {
         didSet { UserDefaults.standard.set(renewClaude, forKey: "renewClaude") }
@@ -75,6 +86,7 @@ final class UsageModel: ObservableObject {
     var onUpdate: (() -> Void)?
     var onShow: (() -> Void)?
     private let claude = ClaudeProvider()
+    private let antigravity = AntigravityProvider(workspace: UsageModel.dataDirectory.appendingPathComponent("antigravity-workspace"))
     private var codexProviders: [String: CodexProvider] = [:]
     /// Additional sign-ins the user turned on or off; others follow `CodexAccount.trackedByDefault`.
     private var codexOn = UserDefaults.standard.stringArray(forKey: "codexAccountsOn") ?? []
@@ -95,7 +107,7 @@ final class UsageModel: ObservableObject {
     private(set) var refreshCount = 0
     private(set) var startedAt = Date()
     private var workspaceObservers: [NSObjectProtocol] = []
-    static let dataDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AIUsageWidget")
+    nonisolated static let dataDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AIUsageWidget")
 
     init() {
         try? FileManager.default.createDirectory(at: Self.dataDirectory, withIntermediateDirectories: true,
@@ -103,6 +115,7 @@ final class UsageModel: ObservableObject {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         if let data = try? Data(contentsOf: Self.dataDirectory.appendingPathComponent("usage.json")),
            let saved = try? decoder.decode(RuntimeCache.self, from: data) { cache = saved }
+        antigravityInstalled = AntigravityCLI.executable() != nil
         applyAccounts(CodexAccounts.discover(folders: codexFolders))
     }
 
@@ -122,7 +135,12 @@ final class UsageModel: ObservableObject {
             providers[account.id] = CodexProvider(home: account.home, signIn: signIn)
         }
         codexProviders = providers
-        let next = [UsageSource.claude] + tracked.map(\.source)
+        applySources()
+    }
+
+    private func applySources() {
+        let tracked = CodexAccounts.tracked(codexAccounts, on: Set(codexOn), off: Set(codexOff))
+        let next = [UsageSource.claude] + tracked.map(\.source) + (showAntigravity && antigravityInstalled ? [.antigravity] : [])
         if next != sources { sources = next }
         for source in sources where services[source.id] == nil {
             services[source.id] = ServiceState(snapshot: cache.snapshots[source.id], status: "Connecting…")
@@ -173,7 +191,7 @@ final class UsageModel: ObservableObject {
     }
     /// Offers to add a date where none is known, except for free ChatGPT plans, which don't renew.
     func canAddPlanDate(_ source: UsageSource) -> Bool {
-        source.provider == .claude || codexAccounts.first(where: { $0.source == source })?.plan?.lowercased() != "free"
+        source.provider != .codex || codexAccounts.first(where: { $0.source == source })?.plan?.lowercased() != "free"
     }
 
     func setPlanDate(_ source: UsageSource, _ entry: ManualPlanDate?) {
@@ -265,11 +283,20 @@ final class UsageModel: ObservableObject {
         let renew = renewClaude
         let folders = codexFolders
         Task {
-            // Picks up accounts signed in or out of Codex Subscription Router since the last refresh.
-            applyAccounts(await Task.detached(priority: .utility) { CodexAccounts.discover(folders: folders) }.value)
+            // Picks up accounts signed in or out of Codex Subscription Router, and an installed or removed
+            // Antigravity CLI, since the last refresh.
+            let (accounts, installed) = await Task.detached(priority: .utility) {
+                (CodexAccounts.discover(folders: folders), AntigravityCLI.executable() != nil)
+            }.value
+            antigravityInstalled = installed
+            applyAccounts(accounts)
             let codex = sources.compactMap { source in codexProviders[source.id].map { (source, $0) } }
+            let readAntigravity = sources.contains(.antigravity)
             await withTaskGroup(of: (UsageSource, ProviderResult).self) { group in
                 group.addTask { [claude] in (.claude, await claude.refresh(minimumGap: gap, allowKeychainUI: allowKeychainUI, allowRenewal: renew)) }
+                if readAntigravity {
+                    group.addTask { [antigravity] in (.antigravity, await antigravity.refresh(minimumGap: gap, manual: manual)) }
+                }
                 for (source, provider) in codex {
                     group.addTask { (source, await provider.refresh(minimumGap: gap)) }
                 }
@@ -379,20 +406,53 @@ final class UsageModel: ObservableObject {
     func openNotificationSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
     }
+    /// What can be used now of a reading's shortest window: 0 under a used-up longer limit (even once the window itself
+    /// has expired), otherwise nil when unknown, expired or stale.
+    private func menuValue(_ source: UsageSource) -> Double? {
+        guard let state = services[source.id], let snapshot = state.snapshot, let primary = snapshot.primary,
+              !state.stale(at: now, after: staleAfter) else { return nil }
+        if snapshot.blocker(of: primary, now: now) != nil { return 0 }
+        return primary.expired(at: now) ? nil : primary.remaining
+    }
+    private static func percent(_ value: Double?) -> String { value.map { "\(Int($0.rounded(.down)))%" } ?? "—" }
+
+    /// One mark and number per provider. Several ChatGPT accounts share one number: the average of what each
+    /// has left, which is the share of their combined allowance left when the plans are the same size.
     var menuReadings: [StatusIcon.Reading] {
-        sources.map { source in
-            let state = services[source.id]
-            let value = state?.snapshot?.primary
-            let number = value.flatMap { !($0.expired(at: now)) && state?.stale(at: now, after: staleAfter) == false ? "\(Int($0.remaining.rounded(.down)))%" : nil } ?? "—"
-            return StatusIcon.Reading(provider: source.provider, value: number, name: title(source))
+        var providers: [ProviderID] = []
+        for source in sources where !providers.contains(source.provider) { providers.append(source.provider) }
+        return providers.map { provider in
+            let group = sources.filter { $0.provider == provider }
+            let values = group.compactMap(menuValue)
+            let value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+            let name = group.count > 1 ? "\(provider.title) (\(group.count) accounts)" : title(group[0])
+            return StatusIcon.Reading(provider: provider, value: Self.percent(value), name: name)
+        }
+    }
+    /// The menu-bar tooltip: each reading, with every account under a merged one.
+    var menuDetails: [String] {
+        menuReadings.flatMap { reading -> [String] in
+            let group = sources.filter { $0.provider == reading.provider }
+            guard group.count > 1 else { return ["\(reading.name): \(reading.value)"] }
+            return ["\(reading.name), average: \(reading.value)"]
+                + group.map { "   \(accountName($0) ?? title($0)): \(Self.percent(menuValue($0)))" }
         }
     }
     var menuTitle: String { menuReadings.map { "\($0.name) \($0.value)" }.joined(separator: " · ") }
+    /// The tallest the panel or menu-bar view may be on its display; taller content scrolls.
+    @Published var maxPanelHeight: CGFloat = .infinity
 
     func writeDiagnostics(window: NSWindow) {
-        Task { writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads, claudeRenewals: await claude.renewals) }
+        Task {
+            let cli = await antigravity.lastExecutable, lapsed = await antigravity.lapsedSince
+            var antigravity: [String: Any] = ["installed": antigravityInstalled, "shown": showAntigravity]
+            if let cli { antigravity["executable"] = cli.url.path; antigravity["managedByT3"] = cli.managedByT3 }
+            if let lapsed { antigravity["signInExpiredSince"] = lapsed.timeIntervalSince1970 }
+            writeDiagnostics(window: window, claudeKeychainReads: await claude.keychainReads, claudeRenewals: await claude.renewals,
+                             antigravity: antigravity)
+        }
     }
-    private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int, claudeRenewals: Int) {
+    private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int, claudeRenewals: Int, antigravity: [String: Any]) {
         let data: [String: Any] = [
             "version": "1.2.0", "startedAt": startedAt.timeIntervalSince1970,
             "refreshCount": refreshCount, "refreshing": refreshing, "suspended": suspended,
@@ -402,7 +462,7 @@ final class UsageModel: ObservableObject {
             "watchedInterval": Int(watchedInterval), "unwatchedInterval": Int(effectiveUnwatchedInterval),
             "watched": viewed, "nextRefreshIn": Int(refreshTimer.map { $0.isValid ? $0.fireDate.timeIntervalSinceNow : 0 } ?? 0), "claudeKeychainReads": claudeKeychainReads,
             "renewClaude": renewClaude, "claudeRenewals": claudeRenewals,
-            "codexAccountsFound": codexAccounts.count,
+            "codexAccountsFound": codexAccounts.count, "antigravity": antigravity,
             "services": Dictionary(uniqueKeysWithValues: sources.map { source in
                 (source.id, ["windowCount": services[source.id]?.snapshot?.windows.count ?? 0,
                              "status": services[source.id]?.status ?? "connected"] as [String: Any])

@@ -5,6 +5,13 @@ import UsageCore
 struct WidgetView: View {
     @ObservedObject var model: UsageModel
     var inPopover = false
+    /// The cards' natural height, measured, to decide whether they must scroll.
+    @State private var cardsHeight: CGFloat = 0
+    /// The measured height of everything else: header, footer, message and padding.
+    @State private var chromeHeight: CGFloat = 100
+    /// Room for the cards on the display.
+    private var cardsLimit: CGFloat { max(240, model.maxPanelHeight - chromeHeight - 2) }
+    private var scrolling: Bool { cardsHeight > cardsLimit }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -53,6 +60,8 @@ struct WidgetView: View {
                         Button("Add Codex Sign-In Folder…") { model.addCodexFolder() }
                         Text("Codex Subscription Router accounts appear automatically")
                     }
+                    Toggle("Show Antigravity", isOn: $model.showAntigravity).disabled(!model.antigravityInstalled)
+                    if !model.antigravityInstalled { Text("Antigravity CLI not found") }
                     Button("Connect Claude…") { model.refresh(manual: true, allowKeychainUI: true) }
                     Toggle("Renew Claude Sign-In Automatically", isOn: $model.renewClaude)
                     Button("Refresh Now") { model.refresh(manual: true) }.keyboardShortcut("r").disabled(model.refreshing)
@@ -63,12 +72,10 @@ struct WidgetView: View {
                     .help("Widget settings").accessibilityLabel("Widget settings")
             }.font(.system(size: 12, weight: .medium)).buttonStyle(.plain)
 
-            ForEach(model.sources) { source in
-                if source != model.sources.first { Divider().overlay(Color.white.opacity(0.05)) }
-                ProviderView(provider: source.provider, account: model.accountName(source),
-                             state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter) {
-                    PlanDateSection(model: model, source: source)
-                }
+            if scrolling {
+                ScrollView(.vertical) { measuredCards }.frame(height: cardsLimit)
+            } else {
+                measuredCards
             }
             HStack(spacing: 5) {
                 Image(systemName: model.topmost ? "pin.fill" : "desktopcomputer")
@@ -84,12 +91,39 @@ struct WidgetView: View {
             }
         }
         .padding(16)
+        .background(GeometryReader { Color.clear.preference(key: TotalHeight.self, value: $0.size.height) })
+        .onPreferenceChange(TotalHeight.self) { total in
+            let chrome = total - (scrolling ? cardsLimit : cardsHeight)
+            if chrome > 0, abs(chrome - chromeHeight) > 0.5 { chromeHeight = chrome }
+        }
         .frame(width: 300)
         .background(Color(red: 0.065, green: 0.082, blue: 0.105))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .preferredColorScheme(.dark)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var cards: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(model.sources) { source in
+                if source != model.sources.first { Divider().overlay(Color.white.opacity(0.05)) }
+                ProviderView(provider: source.provider, account: model.accountName(source),
+                             state: model.services[source.id] ?? ServiceState(), now: model.now, staleAfter: model.staleAfter) {
+                    PlanDateSection(model: model, source: source)
+                }
+            }
+        }
+    }
+    private var measuredCards: some View {
+        cards.fixedSize(horizontal: false, vertical: true)
+            .background(GeometryReader { Color.clear.preference(key: CardsHeight.self, value: $0.size.height) })
+            .onPreferenceChange(CardsHeight.self) { height in
+                guard abs(height - cardsHeight) > 0.5 else { return }
+                cardsHeight = height
+                // The window follows the view's size only when the model reports a change.
+                DispatchQueue.main.async { model.onUpdate?() }
+            }
     }
 
     private func accountTitle(_ account: CodexAccount) -> String {
@@ -104,8 +138,23 @@ struct WidgetView: View {
     }
 }
 
+private struct CardsHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+private struct TotalHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 private extension ProviderID {
-    var accent: Color { self == .claude ? Color(red: 0.91, green: 0.58, blue: 0.43) : Color(red: 0.37, green: 0.81, blue: 0.77) }
+    var accent: Color {
+        switch self {
+        case .claude: return Color(red: 0.91, green: 0.58, blue: 0.43)
+        case .codex: return Color(red: 0.37, green: 0.81, blue: 0.77)
+        case .antigravity: return Color(red: 0.48, green: 0.62, blue: 0.98)
+        }
+    }
 }
 
 private struct ProviderView<PlanDate: View>: View {
@@ -120,6 +169,24 @@ private struct ProviderView<PlanDate: View>: View {
     private var accent: Color { provider.accent }
     private var primary: UsageWindow? { state.snapshot?.primary }
     private var stale: Bool { state.stale(at: now, after: staleAfter) }
+    /// A used-up longer limit leaves nothing in this window either.
+    private func blocker(_ window: UsageWindow) -> UsageWindow? { state.snapshot?.blocker(of: window, now: now) }
+    private func available(_ window: UsageWindow) -> Double { blocker(window) == nil ? window.remaining : 0 }
+    /// A used-up longer limit means 0% even once this window has expired; otherwise an expired window awaits a reading.
+    private func unknown(_ window: UsageWindow) -> Bool { blocker(window) == nil && window.expired(at: now) }
+    private func percent(_ window: UsageWindow) -> String { unknown(window) ? "—" : "\(Int(available(window).rounded(.down)))%" }
+    /// Further windows: one row each, except that a quota pool other than the headline one (an Antigravity model group)
+    /// shares a single row.
+    private var rows: [[UsageWindow]] {
+        guard let snapshot = state.snapshot, let primary else { return [] }
+        var result: [[UsageWindow]] = []
+        for window in snapshot.windows where window.id != primary.id {
+            if let pool = window.pool, pool != primary.pool, let index = result.firstIndex(where: { $0.first?.pool == pool }) {
+                result[index].append(window)
+            } else { result.append([window]) }
+        }
+        return result
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
@@ -134,9 +201,9 @@ private struct ProviderView<PlanDate: View>: View {
             }
             if let primary {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(primary.expired(at: now) ? "—" : "\(Int(primary.remaining.rounded(.down)))%")
+                    Text(percent(primary))
                         .font(.system(size: 34, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(primary.remaining < 10 && !primary.expired(at: now) ? Color.orange : Color.primary)
+                        .foregroundStyle(available(primary) < 10 && !unknown(primary) ? Color.orange : Color.primary)
                     Text("remaining").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }.opacity(stale ? 0.5 : 1)
@@ -144,21 +211,17 @@ private struct ProviderView<PlanDate: View>: View {
                 HStack(alignment: .top, spacing: 8) {
                     Text(primary.label).lineLimit(2)
                     Spacer(minLength: 0)
-                    Text(UsageFormatting.countdown(primary.resetsAt, now: now)).multilineTextAlignment(.trailing).lineLimit(2)
+                    if let blocker = blocker(primary) {
+                        Text(UsageFormatting.blocked(by: blocker, now: now)).multilineTextAlignment(.trailing).lineLimit(2)
+                            .foregroundStyle(Color.orange.opacity(0.9))
+                    } else {
+                        Text(UsageFormatting.countdown(primary.resetsAt, now: now)).multilineTextAlignment(.trailing).lineLimit(2)
+                    }
                 }.font(.system(size: 10)).foregroundStyle(.secondary)
                     .help(resetHelp(primary)).accessibilityElement(children: .combine)
-                ForEach(state.snapshot?.windows.filter { $0.id != primary.id } ?? []) { window in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(window.label).lineLimit(2)
-                            Spacer(minLength: 4)
-                            Text(window.expired(at: now) ? "—" : "\(Int(window.remaining.rounded(.down)))%")
-                                .monospacedDigit().foregroundStyle(.primary)
-                        }.font(.system(size: 11)).foregroundStyle(.secondary)
-                        quotaBar(window, height: 3)
-                        Text(UsageFormatting.countdown(window.resetsAt, now: now))
-                            .font(.system(size: 9)).foregroundStyle(.tertiary)
-                    }.padding(.top, 4).help(resetHelp(window))
+                // One line and a bar per further window, so cards with several limits stay short.
+                ForEach(rows, id: \.first!.id) { row in
+                    if row.count == 1, let window = row.first { windowRow(window) } else { poolRow(row) }
                 }
             } else {
                 Text("—").font(.system(size: 34, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
@@ -181,16 +244,66 @@ private struct ProviderView<PlanDate: View>: View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.08))
-                Capsule().fill(window.remaining < 10 ? Color.orange : accent)
-                    .frame(width: geometry.size.width * (window.expired(at: now) ? 0 : window.remaining / 100))
+                Capsule().fill(available(window) < 10 ? Color.orange : accent)
+                    .frame(width: geometry.size.width * (unknown(window) ? 0 : available(window) / 100))
                     .opacity(stale ? 0.35 : 1)
             }
         }.frame(height: height)
-            .accessibilityLabel(window.label).accessibilityValue(window.expired(at: now) ? "Awaiting update" : "\(Int(window.remaining)) percent remaining")
+            .accessibilityLabel(window.label).accessibilityValue(unknown(window) ? "Awaiting update" : "\(Int(available(window))) percent remaining")
+    }
+    private func windowRow(_ window: UsageWindow) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(window.label).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                Text(blocker(window).map { UsageParser.windowLabel($0.minutes, fallback: "Longer limit").lowercased() + " used up" }
+                     ?? UsageFormatting.shortCountdown(window.resetsAt, now: now))
+                    .font(.system(size: 9)).lineLimit(1)
+                    .foregroundStyle(blocker(window) == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange.opacity(0.85)))
+                Text(percent(window)).monospacedDigit().foregroundStyle(.primary)
+            }.font(.system(size: 11)).foregroundStyle(.secondary)
+            quotaBar(window, height: 3)
+        }.padding(.top, 3).help(resetHelp(window)).accessibilityElement(children: .combine)
+    }
+    /// A quota group in one row, "Claude and GPT   5h 95% · wk 70%", with a bar for whichever is lower.
+    private func poolRow(_ windows: [UsageWindow]) -> some View {
+        let name = windows[0].label.components(separatedBy: " · ").first ?? windows[0].label
+        let tightest = windows.min { (unknown($0) ? 101 : available($0)) < (unknown($1) ? 101 : available($1)) } ?? windows[0]
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(name).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
+                    if index > 0 { Text("·").foregroundStyle(.tertiary) }
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(Self.shortName(window)).font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Text(percent(window)).monospacedDigit()
+                            .foregroundStyle(blocker(window) != nil ? Color.orange.opacity(0.9) : Color.primary)
+                    }
+                }
+            }.font(.system(size: 11)).foregroundStyle(.secondary)
+            quotaBar(tightest, height: 3)
+        }.padding(.top, 3).help(windows.map { $0.label + " · " + percent($0) + " · " + resetHelp($0) }.joined(separator: "\n"))
+            .accessibilityElement(children: .combine)
+    }
+    private static func shortName(_ window: UsageWindow) -> String {
+        switch window.minutes {
+        case 300: return "5h"
+        case 10080: return "wk"
+        case 1440: return "day"
+        case 60: return "1h"
+        default: return window.label.components(separatedBy: " · ").last ?? window.label
+        }
     }
     private func resetHelp(_ window: UsageWindow) -> String {
-        guard let reset = window.resetsAt else { return "The provider has not supplied a reset time." }
-        return "Resets " + reset.formatted(date: .complete, time: .standard)
+        var text = window.resetsAt.map { "Resets " + $0.formatted(date: .complete, time: .standard) }
+            ?? "The provider has not supplied a reset time."
+        if let blocker = blocker(window) {
+            text = "\(Int(window.remaining.rounded(.down)))% of this window is left, but the \(blocker.label) limit is used up, "
+                + "so none of it can be used until that resets"
+                + (blocker.resetsAt.map { " " + $0.formatted(date: .complete, time: .shortened) } ?? "") + ". " + text
+        }
+        return text
     }
 }
 
@@ -211,9 +324,14 @@ private struct PlanDateSection: View {
         } else if model.canAddPlanDate(source) {
             chip(icon: "calendar.badge.plus", text: "Renewal date",
                  color: hovering || editing ? Color.secondary : Color(white: 1, opacity: 0.32))
-                .help(source.provider == .claude
-                      ? "Claude's sign-in doesn't report when the subscription renews. Add the date from claude.ai → Settings → Billing."
-                      : "Add when this subscription renews or ends.")
+                .help(addDateHelp)
+        }
+    }
+    private var addDateHelp: String {
+        switch source.provider {
+        case .claude: return "Claude's sign-in doesn't report when the subscription renews. Add the date from claude.ai → Settings → Billing."
+        case .antigravity: return "Antigravity doesn't report when your Google AI plan renews. Add the date from Google One → Manage plan."
+        case .codex: return "Add when this subscription renews or ends."
         }
     }
     private func chip(icon: String, text: String, color: Color) -> some View {

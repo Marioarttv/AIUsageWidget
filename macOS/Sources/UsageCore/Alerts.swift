@@ -43,6 +43,8 @@ public struct AlertLedger: Codable {
             guard previous == nil || snapshot.updatedAt > previous!.date else { continue }
             let reset = window.resetsAt.map { String(Int($0.timeIntervalSince1970)) }
             let recovered = previous.map { $0.window.remaining < 10 && window.remaining >= 10 } ?? false
+            // A window under a used-up longer limit has nothing to use, so it neither resets nor runs low.
+            let blocked = snapshot.blocker(of: window, now: now) != nil
             var didReset = false
             if let old = previous?.window, let oldReset = old.resetsAt {
                 // Providers can shift the same boundary by a second between otherwise identical readings.
@@ -55,7 +57,9 @@ public struct AlertLedger: Codable {
                     // An early, provider-confirmed reset (e.g. a redeemed reset credit).
                     didReset = nextReset.timeIntervalSince(oldReset) > boundaryTolerance && window.usedPercent == 0 && old.usedPercent > 0
                 }
-                if didReset && resetEnabled {
+                // Only a window that was used can usefully reset: unused windows of some providers
+                // (Antigravity) report a boundary that keeps moving forward.
+                if didReset && resetEnabled && old.usedPercent > 0 && !blocked {
                     enqueue(UsageAlert(id: "\(key):reset:\(Int(oldReset.timeIntervalSince1970))", provider: provider, kind: .reset,
                                        label: window.label, remaining: window.remaining, createdAt: now, expiresAt: now.addingTimeInterval(1800),
                                        source: source.id, account: account))
@@ -67,7 +71,7 @@ public struct AlertLedger: Codable {
             else if recovered && window.resetsAt == nil && previous?.window.resetsAt == nil { cycle = UUID().uuidString }
             // Drop obsolete low alerts after recovery or a rollover before permission/delivery succeeds.
             pending.removeAll { $0.kind == .low && $0.id.hasPrefix(key + ":low:") && (recovered || didReset) }
-            if lowEnabled && window.minutes == 300 && window.remaining < 10 && !window.expired(at: now) {
+            if lowEnabled && window.minutes == 300 && window.remaining < 10 && !window.expired(at: now) && !blocked {
                 enqueue(UsageAlert(id: "\(key):low:\(cycle)", provider: provider, kind: .low,
                                    label: window.label, remaining: window.remaining, createdAt: now,
                                    expiresAt: min(window.resetsAt ?? now.addingTimeInterval(1800), now.addingTimeInterval(1800)),

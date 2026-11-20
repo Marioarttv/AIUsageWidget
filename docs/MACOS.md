@@ -2,7 +2,7 @@
 
 ## Install and run
 
-Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. The build targets the current Mac's architecture.
+Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. Antigravity is optional (see [Antigravity](#antigravity)). The build targets the current Mac's architecture.
 
 ```sh
 ./macOS/scripts/install.sh
@@ -17,7 +17,9 @@ The build uses an existing Apple Development signing identity when available, wi
 - **Desktop mode** is the default: the panel sits above the desktop icons and below application windows. It appears on desktop Spaces without appearing in the application switcher.
 - **Pin** switches to a floating panel above normal windows. Full-screen behavior depends on the active Space and macOS; system/security surfaces retain their own ordering.
 - **Drag the AI USAGE title** to reposition the panel. The position and display mode persist. Disconnecting a display brings an offscreen panel back onto an available display.
-- **The Claude and ChatGPT marks in the menu bar** show Claude / Codex remaining allowance for the shortest reported window. With several ChatGPT accounts tracked, the ChatGPT mark is followed by one number per account, in panel order; hover over the menu-bar item to see which email each number belongs to. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
+- **The Claude, ChatGPT and Gemini marks in the menu bar** show what is left of Claude, Codex and Antigravity for the shortest reported window. With several ChatGPT accounts tracked, the ChatGPT mark has one number: the average of what each account has left, which is the share of their combined allowance left when the plans are the same size. An account whose weekly limit is used up counts as 0%. Hover over the menu-bar item for each account's own number. Click for the complete widget; right-click for quick show/hide, pin, and quit commands. Unknown, expired, or failed readings show a dash in the menu bar.
+- **Used-up weekly limits:** once a weekly limit runs out, the shorter limits it covers show 0% as well, in orange, with “Weekly used up · 4d 5h” (when it resets) beside them; hover for the exact time and what is left of the window itself. Limits only cover their own quota: a Claude model's weekly limit doesn't zero the session, a spent Claude week zeroes everything, a Codex limit bucket covers its own windows, and an Antigravity model group covers its own windows.
+- **Further limits** take one line each, with a short reset countdown and a bar. When the cards are taller than the display, they scroll.
 - **⋯** contains show/hide, reposition, launch at login, refresh intervals, both alert toggles, a test notification, notification settings, ChatGPT account choices, Claude connection access, and automatic Claude sign-in renewal.
 - **Renewal dates** sit at the foot of each subscription, beside “Updated …”. Click the date (or **Renewal date** under Claude, whose sign-in doesn't report billing) to open a calendar in a small card under it; the panel doesn't grow. Pick the day, choose *Monthly*, *Yearly*, or *Ends* (cancelled), and **Save**; clicking anywhere else closes the card without saving. The section then shows “Renews 26 Nov” or “Ends 26 Nov”; a renewing date moves on to the next month or year by itself, and a dot in the calendar marks the next renewal. For Claude, the date is on claude.ai → Settings → Billing. **Remove** hides it. Dates are kept only in the widget's settings.
 - **Refresh While Visible** (1–30 minutes, default 3) sets how often readings refresh while the panel or menu-bar view is on screen; the panel footer shows it. **Refresh While Hidden** (5–60 minutes, default 10) applies while the panel is hidden or fully covered; it is never shorter than the visible interval. Intervals under three minutes poll Claude's rate-limited usage endpoint more often and are more likely to meet its backoff.
@@ -36,14 +38,22 @@ Use the checkmarks in **⋯ → ChatGPT Accounts** to show or hide each account.
 
 Each extra account is read by starting the Codex CLI with `CODEX_HOME` set to that account's folder, exactly as for the main sign-in. To list accounts, the widget reads only the email, plan, account ID, and paid-period end from each `auth.json`; it never stores or logs tokens. The CLI may renew an account's sign-in as usual while reading it, as Codex Subscription Router does.
 
+## Antigravity
+
+The panel shows an Antigravity section, and the menu bar a Gemini mark, once the Antigravity CLI is found and signed in. The large number is the Gemini 5-hour limit; below it are the Gemini weekly limit, the *Claude and GPT* group (5-hour and weekly on one row, with a bar for the lower), and any further limit, such as *Gemini 4 Argon · Weekly*. Within each group, models share a weekly and a 5-hour limit. Click **Renewal date** to enter when your Google AI plan renews (Antigravity doesn't report it). Turn the section off in **⋯ → Show Antigravity**.
+
+- **Where the CLI is found:** `antigravity` or `agy` on PATH, in `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin`, then the copy T3 Code installs (`~/.t3/tools/antigravity-acp/…`, the active release only, once its install has finished). Only a native CLI binary qualifies, never the Antigravity editor's `antigravity` launcher or another script.
+- **How it is read:** at each refresh the widget runs `antigravity -p /usage --output-format json` once, in an empty private folder (`~/Library/Application Support/AIUsageWidget/antigravity-workspace`), with no model turn, update check, log file or listening port, and stops it after 35 seconds at most. The CLI owns the Google sign-in, which it keeps in the login Keychain (item `gemini`), and renews it as needed. The widget only checks that the item exists, reading its attributes, never the token.
+- **Signed out:** the CLI would open a browser to sign in. The widget runs it without a PATH, so it can't, and stops it as soon as it asks for a login. The section then says *Sign-in expired · Start an Antigravity session in T3 Code* (or *Run antigravity in Terminal*). Signing in there fixes it; the widget doesn't start the CLI again for that sign-in until it changes, you press ↻, or half an hour has passed.
+
 ## Notifications
 
 Allow notifications on first launch. Use **Send Test Notification** to verify the delivery path. If permission was denied, enable the app in **System Settings → Notifications**. Focus, notification style, and screen-sharing settings can affect banners and sound.
 
 The two toggles are independent and enabled by default:
 
-1. **Below 10%:** only windows whose reported duration is five hours qualify. Exactly 10% remaining does not trigger a warning. Already-low windows warn on first connection; subsequent polls and app restarts do not repeat that warning for the same window.
-2. **Usage reset:** all tracked windows qualify, including weekly and model-specific weekly limits. The app compares fresh provider observations. An advanced reset boundary after the old boundary has passed confirms rollover, even if the new window is already partly used. A return to an idle zero-use window without a reset date can also confirm rollover. An early reset requires zero use and an advanced boundary. The app never spends a reset credit.
+1. **Below 10%:** only windows whose reported duration is five hours qualify, and not while a used-up weekly limit already holds them at 0%. Exactly 10% remaining does not trigger a warning. Already-low windows warn on first connection; subsequent polls and app restarts do not repeat that warning for the same window.
+2. **Usage reset:** all tracked windows qualify, including weekly and model-specific weekly limits. A window that wasn't used before the reset is skipped, as are windows under a used-up weekly limit (they stay at 0% after their own reset). The app compares fresh provider observations. An advanced reset boundary after the old boundary has passed confirms rollover, even if the new window is already partly used. A return to an idle zero-use window without a reset date can also confirm rollover. An early reset requires zero use and an advanced boundary. The app never spends a reset credit.
 
 Reset messages for multiple windows on the same provider are grouped when detected together. Clicking a notification opens the menu-bar view. A first reading establishes a baseline without a historical reset alert. Notification history and baselines survive restart; delayed, unsent events expire to avoid stale alerts.
 
@@ -56,11 +66,12 @@ Detection happens at the next successful refresh while the Mac is awake: at the 
 - **Codex:** invokes the installed native CLI's documented `account/rateLimits/read` over stdio, after the initialization handshake, once per tracked ChatGPT account. The CLI owns sign-in and authentication. No model requests, conversation reads, reset-credit redemption, or listening network port are used. The short-lived process exits after the reading, with a bounded timeout. Homebrew/npm and common native CLI locations are supported. A CLI account can differ from the account selected in the Codex desktop app.
 - **Claude:** reads the existing `Claude Code-credentials` item from the macOS Keychain through `/usr/bin/security`, the same way Claude Code reads it. Claude Code creates the item with that tool, so the read is silent and keeps working after Claude Code renews its sign-in. If that read fails, the app queries the Keychain directly without a prompt; **Connect Claude…** allows macOS to request access. The credentials-file fallback is also supported, including `CLAUDE_CONFIG_DIR`; custom-directory Keychain identities are not currently queried. The token is kept in memory only, until it nears expiry or Claude rejects it; it is never logged or written to the app's files.
 - **Claude sign-in renewal:** Claude Code's access token lasts about eight hours, and Claude Code renews it only while it runs. With **Renew Claude Sign-In Automatically** (in **⋯**, on by default), the widget renews a lapsed sign-in the way Claude Code does: it holds Claude Code's own refresh lock (`~/.claude/.oauth_refresh.lock` and `~/.claude.lock`), re-reads the Keychain item, and renews only if the token is still expired, then saves the renewed tokens back into `Claude Code-credentials` through `/usr/bin/security`. Claude Code then picks up the renewed sign-in instead of renewing it a second time; two simultaneous renewals would spend the same single-use refresh token and sign you out. Renewal applies only to the default Keychain item, never to `CLAUDE_CONFIG_DIR` or the credentials file, and `--check` never renews. If Claude refuses the renewal, the panel asks you to sign in to Claude Code again. Turn the setting off to leave renewal to Claude Code; then open Claude Code to renew an expired sign-in.
+- **Antigravity:** runs the CLI's own `/usage` command, as described under [Antigravity](#antigravity). The CLI owns sign-in and renewal; the widget never reads the token.
 - Claude's account-usage endpoint is not a public, stable API and can change. The app honors HTTP 429 and `Retry-After`, including date-form headers. It does not install or change Claude status-line configuration.
 
 Usage snapshots and alert history are stored in `~/Library/Application Support/AIUsageWidget/usage.json`. The directory is private to the user. Preferences use the `com.mariomanzocco.aiusagewidget` defaults domain. No conversation content or authentication tokens are stored there.
 
-Menu-bar marks use [Simple Icons](https://simpleicons.org) path data (CC0); the logos are trademarks of Anthropic and OpenAI.
+Menu-bar marks use [Simple Icons](https://simpleicons.org) path data (CC0); the logos are trademarks of Anthropic, OpenAI and Google. Simple Icons has no Antigravity mark, so Antigravity uses the Google Gemini mark.
 
 Interface documentation: [Codex app server](https://learn.chatgpt.com/docs/app-server), [Claude credential storage](https://code.claude.com/docs/en/authentication).
 
@@ -76,7 +87,7 @@ swift test --package-path macOS --jobs 4
 "$HOME/Applications/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --check
 ```
 
-`--check` prints only connection status, window counts, and the email of each tracked ChatGPT account. It does not start the widget, request Keychain interaction, renew the Claude sign-in, or send notifications. A failed provider gives exit code 1.
+`--check` prints only connection status, window counts, and the email of each tracked ChatGPT account, and checks Antigravity when its CLI is installed and the section is on. It does not start the widget, request Keychain interaction, renew the Claude sign-in, or send notifications. A failed provider gives exit code 1.
 
 With the installed app running, this requests a small runtime report:
 
@@ -85,10 +96,10 @@ With the installed app running, this requests a small runtime report:
 cat "$HOME/Library/Application Support/AIUsageWidget/diagnostics.json"
 ```
 
-`diagnostics.json` includes `claudeRenewals`, the number of sign-in renewals since launch.
+`diagnostics.json` includes `claudeRenewals`, the number of sign-in renewals since launch, and under `antigravity` whether the CLI was found, its path, whether T3 Code manages it, and since when its sign-in has needed renewing.
 
-Core tests cover Claude sign-in renewal requests, token merging, and Claude Code's refresh lock, ChatGPT account discovery, deduplication, and per-account alerts, as well as parsing, missing/zero values, dynamic durations, multiple quota buckets, strict alert thresholds, persistent deduplication, reset confirmation, stale/out-of-order observations, and permission-delay recovery. Set `AIW_KEYCHAIN_TESTS=1` to add a Keychain write/read round trip on a scratch item (never Claude Code's). Live UI, credentials, sign-in renewal against Claude, and macOS notification delivery are separate runtime checks.
+Core tests cover Claude sign-in renewal requests, token merging, and Claude Code's refresh lock, Antigravity parsing, CLI discovery and its browser-proof environment, used-up weekly limits zeroing the windows they cover, ChatGPT account discovery, deduplication, and per-account alerts, as well as parsing, missing/zero values, dynamic durations, multiple quota buckets, strict alert thresholds, persistent deduplication, reset confirmation, stale/out-of-order observations, and permission-delay recovery. Set `AIW_KEYCHAIN_TESTS=1` to add a Keychain write/read round trip on a scratch item (never Claude Code's). Live UI, credentials, sign-in renewal against Claude, and macOS notification delivery are separate runtime checks.
 
 ## Remove
 
-Disable **Launch at Login**, quit from the menu bar, and remove `~/Applications/AI Usage Widget.app`. If desired, separately remove `~/Library/Application Support/AIUsageWidget` and the app's preferences. Claude and Codex sign-ins are unaffected.
+Disable **Launch at Login**, quit from the menu bar, and remove `~/Applications/AI Usage Widget.app`. If desired, separately remove `~/Library/Application Support/AIUsageWidget` and the app's preferences. Claude, Codex and Antigravity sign-ins are unaffected.
