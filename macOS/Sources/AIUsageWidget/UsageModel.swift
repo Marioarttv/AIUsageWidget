@@ -439,8 +439,9 @@ final class UsageModel: ObservableObject {
         }
     }
     var menuTitle: String { menuReadings.map { "\($0.name) \($0.value)" }.joined(separator: " · ") }
-    /// The tallest the panel or menu-bar view may be on its display; taller content scrolls.
+    /// The tallest the panel and the menu-bar view may be on their displays; taller cards scroll.
     @Published var maxPanelHeight: CGFloat = .infinity
+    @Published var maxPopoverHeight: CGFloat = .infinity
 
     func writeDiagnostics(window: NSWindow) {
         Task {

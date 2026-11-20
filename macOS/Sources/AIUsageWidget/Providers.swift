@@ -142,14 +142,15 @@ actor AntigravityProvider {
     var lapsedSince: Date? { lapsed?.at }
 
     func refresh(minimumGap: TimeInterval = 150, manual: Bool = false) async -> ProviderResult {
+        // ↻ retries a sign-in that needed renewing even when it comes too soon after the last attempt to run now.
+        if manual || lapsed.map({ Date().timeIntervalSince($0.at) > 1800 }) == true { lapsed = nil }
         guard Date().timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
         lastAttempt = Date()
-        if manual || lapsed.map({ Date().timeIntervalSince($0.at) > 1800 }) == true { lapsed = nil }
         let workspace = workspace, known = lapsed
         let (result, cli, signIn, needsLogin) = await Task.detached(priority: .utility) {
             () -> (ProviderResult, AntigravityCLI.Executable?, String?, Bool) in
             guard let cli = AntigravityCLI.executable() else { return (.failure("Install the Antigravity CLI to connect"), nil, nil, false) }
-            let how = cli.managedByT3 ? "Start an Antigravity session in T3 Code" : "Run \(cli.url.lastPathComponent) in Terminal"
+            let how = cli.managedByT3 ? "Open Antigravity in T3 Code" : "Run \(cli.url.lastPathComponent) in Terminal"
             guard let signIn = SecurityTool.modified(service: AntigravityCLI.keychainService, account: AntigravityCLI.keychainAccount) else {
                 return (.failure("Not signed in · " + how), cli, nil, false)
             }
