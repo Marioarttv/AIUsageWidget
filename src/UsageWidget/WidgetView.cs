@@ -115,7 +115,7 @@ internal static class WidgetView
 
         // Header: dot, name, account and plan, and the headline percentage.
         var head = new Grid();
-        foreach (var width in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
+        foreach (var width in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
         var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = accent, Margin = new Thickness(0, 1, 7, 0), VerticalAlignment = VerticalAlignment.Center };
         var name = Text(s.Title, 13, p.Ink); name.FontWeight = FontWeights.SemiBold; name.ToolTip = s.About; name.Background = Brushes.Transparent;
@@ -125,12 +125,13 @@ internal static class WidgetView
         {
             var account = Text(MiddleTrim(s.Account, 24), 10, p.Muted);
             account.Margin = new Thickness(6, 1, 0, 0); account.TextTrimming = TextTrimming.CharacterEllipsis; account.ToolTip = s.Account;
-            Grid.SetColumn(account, 2); head.Children.Add(account);
+            Grid.SetColumn(account, 3); head.Children.Add(account);
         }
         if (!string.IsNullOrWhiteSpace(s.Plan))
         {
+            // Beside the name, before the account, so it reads "Codex PRO you@example.com".
             var badge = Text(s.Plan.ToUpperInvariant(), 8.5, p.Faint); badge.Margin = new Thickness(6, 2, 0, 0);
-            Grid.SetColumn(badge, s.Account is null ? 2 : 3); head.Children.Add(badge);
+            Grid.SetColumn(badge, 2); head.Children.Add(badge);
         }
         double? headline = UsageFormatting.Headline(snapshot, now);
         var blocker = primary is null ? null : Blocker(primary);
@@ -333,9 +334,11 @@ internal sealed class PlanDateEditor : Border
 
         // Week grid: six rows, so every month takes the same space.
         var first = System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
-        var grid = new UniformGrid { Columns = 7 };
+        var weekdays = new UniformGrid { Columns = 7, Margin = new Thickness(0, 0, 0, 2) };
         foreach (var symbol in MonthGrid.WeekdaySymbols(first))
-            grid.Children.Add(new TextBlock { Text = symbol, FontSize = 9, FontWeight = FontWeights.Medium, Foreground = p.Faint, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 3) });
+            weekdays.Children.Add(new TextBlock { Text = symbol, FontSize = 9, FontWeight = FontWeights.Medium, Foreground = p.Faint, HorizontalAlignment = HorizontalAlignment.Center });
+        body.Children.Add(weekdays);
+        var grid = new UniformGrid { Columns = 7 };
         var repeat = MonthGrid.Repeat(day, cycle, year, month);
         foreach (var cell in MonthGrid.Days(year, month, first))
         {
