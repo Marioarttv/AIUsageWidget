@@ -1,0 +1,22 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+    paths: ["macOS/**", "assets/**", ".github/workflows/macos.yml"]
+  pull_request:
+    paths: ["macOS/**", "assets/**", ".github/workflows/macos.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: swift test --package-path macOS
+      - name: Build the app (universal, ad-hoc signed)
+        run: AI_WIDGET_UNIVERSAL=1 AI_WIDGET_SIGNING_IDENTITY=- ./macOS/scripts/build-app.sh
