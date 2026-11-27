@@ -210,27 +210,30 @@ internal static class LogicTests
             string duplicate = Home(root, "router-duplicate", "main@example.com", "acct-main");
             string empty = Path.Combine(root, "router-empty"); Directory.CreateDirectory(empty);
             string folder = Home(root, "folder", "folder@example.com", "acct-folder");
+            string colleague = Home(root, "router-colleague", "colleague@example.com", "acct-main");
             string signedOutFolder = Path.Combine(root, "folder-signed-out"); Directory.CreateDirectory(signedOutFolder);
             string state = Path.Combine(root, "state.json");
             File.WriteAllText(state, JsonSerializer.Serialize(new { version = 1, accounts = new object[] {
                 new { id = "slot0", codexHome = second, enabled = true }, new { id = "slot1", codexHome = free, enabled = false },
                 new { id = "slot2", codexHome = duplicate, enabled = true }, new { id = "slot3", codexHome = empty, enabled = true },
                 new { id = "slot4", codexHome = second.ToUpperInvariant() + Path.DirectorySeparatorChar, enabled = true },
-                new { id = "slot5", codexHome = folder, enabled = true } }, threadOwner = new { } }));
+                new { id = "slot5", codexHome = folder, enabled = true }, new { id = "slot6", codexHome = colleague, enabled = true } }, threadOwner = new { } }));
             var accounts = CodexAccounts.Discover([folder, signedOutFolder], main, state, root);
-            Check(accounts.Select(a => a.Origin).SequenceEqual([CodexOrigin.Main, CodexOrigin.Folder, CodexOrigin.Folder, CodexOrigin.Router, CodexOrigin.Router]),
+            Check(accounts.Select(a => a.Origin).SequenceEqual([CodexOrigin.Main, CodexOrigin.Folder, CodexOrigin.Folder, CodexOrigin.Router, CodexOrigin.Router, CodexOrigin.Router]),
                 "Main, then added folders, then signed-in router accounts, each listed once: " + string.Join(", ", accounts.Select(a => a.Origin + " " + a.Name)));
-            Check(accounts.Select(a => a.Key).SequenceEqual([null, "acct-folder", CodexAccounts.Normalize(signedOutFolder), "acct-second", "acct-free"]),
-                "Account ids identify sign-ins; a signed-out folder is keyed by its path.");
+            Check(accounts.Select(a => a.Key).SequenceEqual([null, "acct-folder/folder@example.com", CodexAccounts.Normalize(signedOutFolder), "acct-second/second@example.com", "acct-free/free@example.com", "acct-main/colleague@example.com"]),
+                "Account id and email identify sign-ins (a Team colleague shares the workspace id); a signed-out folder is keyed by its path: " + string.Join(", ", accounts.Select(a => a.Key)));
             Check(accounts[3].PaidUntil == DateTimeOffset.Parse("2026-10-28T05:23:28.123456+00:00", CultureInfo.InvariantCulture) && accounts[3].Email == "second@example.com",
                 "Each account keeps its own paid-period end and email.");
             var tracked = CodexAccounts.Tracked(accounts, new HashSet<string>(), new HashSet<string>());
-            Check(tracked.Select(a => a.Key).SequenceEqual([null, "acct-folder", CodexAccounts.Normalize(signedOutFolder), "acct-second"]), "Free plans are listed but off by default.");
-            tracked = CodexAccounts.Tracked(accounts, new HashSet<string> { "acct-free" }, new HashSet<string> { "acct-second" });
-            Check(tracked.Select(a => a.Key).SequenceEqual([null, "acct-folder", CodexAccounts.Normalize(signedOutFolder), "acct-free"]), "The user's choices override the defaults.");
+            Check(tracked.Select(a => a.Key).SequenceEqual([null, "acct-folder/folder@example.com", CodexAccounts.Normalize(signedOutFolder), "acct-second/second@example.com", "acct-main/colleague@example.com"]), "Free plans are listed but off by default.");
+            tracked = CodexAccounts.Tracked(accounts, new HashSet<string> { "acct-free/free@example.com" }, new HashSet<string> { "acct-second/second@example.com", "acct-main/colleague@example.com" });
+            Check(tracked.Select(a => a.Key).SequenceEqual([null, "acct-folder/folder@example.com", CodexAccounts.Normalize(signedOutFolder), "acct-free/free@example.com"]), "The user's choices override the defaults.");
             Check(CodexAccounts.Tracked(accounts, new HashSet<string>(), new HashSet<string> { "x" }).First().Key is null, "The main sign-in is always tracked.");
             Check(CodexAccounts.Discover([], Path.Combine(root, "none"), Path.Combine(root, "missing.json"), root) is [{ Origin: CodexOrigin.Main, SignedIn: false }],
                 "Without any sign-in the main account is still listed.");
+            Check(CodexAccounts.Key(new("A@Example.com", null, "acct")) == "acct/a@example.com" && CodexAccounts.Key(new(null, null, "acct")) == "acct" && CodexAccounts.Key(new("a@example.com", null, null)) is null,
+                "Account keys are stable and never contain '|', which alert history uses as a separator.");
             Check(new UsageSource(UsageProvider.Codex).SnapshotName == "codex.json" && new UsageSource(UsageProvider.Codex, "acct-second").SnapshotName.StartsWith("codex-")
                 && new UsageSource(UsageProvider.Codex, "acct-second").Id == "codex@acct-second" && new UsageSource(UsageProvider.Codex, "acct-second").AlertKey == "Codex@acct-second"
                 && UsageSource.Claude.SnapshotName == ClaudeService.SnapshotName && UsageSource.Antigravity.Id == "antigravity",

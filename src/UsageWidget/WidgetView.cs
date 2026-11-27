@@ -57,9 +57,9 @@ internal static class WidgetView
             Grid.SetColumn(button, column);
             return button;
         }
-        refresh = Icon("", "Refresh usage", 1); refresh.ToolTip = "Refresh usage";
-        pin = Icon("", "Toggle always on top", 2);
-        menu = Icon("", "Widget settings", 3); menu.ToolTip = "Widget settings";
+        refresh = Icon("\uE72C", "Refresh usage", 1); refresh.ToolTip = "Refresh usage";
+        pin = Icon("\uE841", "Toggle always on top", 2);
+        menu = Icon("\uE712", "Widget settings", 3); menu.ToolTip = "Widget settings";
         dragHandle.Children.Add(refresh); dragHandle.Children.Add(pin); dragHandle.Children.Add(menu);
         stack.Children.Add(dragHandle);
         cards = new StackPanel();
@@ -241,7 +241,7 @@ internal static class WidgetView
     // The renewal-date chip: "Renews 26 Nov", orange "Paid until 28 Oct" once passed, or a faint "Renewal date" to add one.
     private static Button Chip(PlanDateLine? line, string? addHelp, Palette p)
     {
-        var icon = new TextBlock { Text = line is null ? "" : "", FontFamily = new FontFamily(IconFont), FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 4, 0) };
+        var icon = new TextBlock { Text = line is null ? "\uECC8" : "\uE787", FontFamily = new FontFamily(IconFont), FontSize = 9, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 4, 0) };
         var text = new TextBlock { Text = line?.Text ?? "Renewal date", FontSize = 9.5, VerticalAlignment = VerticalAlignment.Center };
         var content = new StackPanel { Orientation = Orientation.Horizontal };
         content.Children.Add(icon); content.Children.Add(text);
@@ -320,8 +320,8 @@ internal sealed class PlanDateEditor : Border
         // Month header
         var header = new Grid { Margin = new Thickness(0, 0, 0, 4) };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var previous = new Button { Content = "", Style = (Style)Application.Current.FindResource("IconButton"), FontSize = 9 };
-        var next = new Button { Content = "", Style = (Style)Application.Current.FindResource("IconButton"), FontSize = 9 };
+        var previous = new Button { Content = "\uE76B", Style = (Style)Application.Current.FindResource("IconButton"), FontSize = 9 };
+        var next = new Button { Content = "\uE76C", Style = (Style)Application.Current.FindResource("IconButton"), FontSize = 9 };
         AutomationProperties.SetName(previous, "Previous month"); AutomationProperties.SetName(next, "Next month");
         previous.Click += (_, _) => Step(-1); next.Click += (_, _) => Step(1);
         var title = Plain(new TextBlock { Text = new DateTime(year, month, 1).ToString("MMMM yyyy"), FontSize = 11, FontWeight = FontWeights.SemiBold }, "Go to the selected day");

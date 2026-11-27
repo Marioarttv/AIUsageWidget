@@ -229,14 +229,14 @@ public partial class MainWindow : Window
         string folder = CodexAccounts.Normalize(dialog.FolderName);
         var identity = CodexAccounts.ReadIdentity(folder);
         if (identity is null) { System.Windows.MessageBox.Show("No ChatGPT sign-in was found in that folder.", "AI Usage Widget", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        if (codexAccounts.FirstOrDefault(a => a.AccountId is not null && a.AccountId == identity.AccountId) is CodexAccount existing)
+        if (codexAccounts.FirstOrDefault(a => CodexAccounts.SameAccount(a, identity)) is CodexAccount existing)
         {
             if (existing.Key is not null && !sources.Contains(existing.Source)) SetTracked(existing, true);
             System.Windows.MessageBox.Show(existing.Name + " is already listed.", "AI Usage Widget", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         if (!settings.CodexFolders.Contains(folder, StringComparer.OrdinalIgnoreCase)) settings.CodexFolders.Add(folder);
-        settings.CodexAccountsOff.Remove(identity.AccountId ?? folder);
+        settings.CodexAccountsOff.Remove(CodexAccounts.Key(identity) ?? folder);
         SaveSettings();
         ApplyAccounts(CodexAccounts.Discover(settings.CodexFolders));
         Render();
@@ -268,9 +268,14 @@ public partial class MainWindow : Window
             {
                 foreach (var source in sources.ToList())
                 {
-                    if (codexServices.TryGetValue(source.Id, out var service)) await service.RefreshAsync();
-                    else if (source == UsageSource.Antigravity) await antigravity.RefreshAsync(manual);
-                    else continue;
+                    // One failing reader must not stop the others.
+                    try
+                    {
+                        if (codexServices.TryGetValue(source.Id, out var service)) await service.RefreshAsync();
+                        else if (source == UsageSource.Antigravity) await antigravity.RefreshAsync(manual);
+                        else continue;
+                    }
+                    catch (Exception ex) { DataStore.Log($"Refresh {source.Provider}: {ex.GetType().Name}"); }
                     Render();
                 }
             }
@@ -315,7 +320,7 @@ public partial class MainWindow : Window
         DrawCards(states, now);
         bool pinned = settings.Mode == "topmost";
         // Filled, highlighted pin while always on top; muted crossed-out pin while on the desktop.
-        PinButton.Content = pinned ? "" : "";
+        PinButton.Content = pinned ? "\uE841" : "\uE77A";
         if (pinned) { PinButton.Foreground = palette.Ink; PinButton.Background = palette.PinBack; }
         else { PinButton.ClearValue(ForegroundProperty); PinButton.ClearValue(BackgroundProperty); }
         PinButton.ToolTip = pinned ? "Always on top · click to place it on the desktop below other windows" : "On the desktop below other windows · click to keep it on top";
