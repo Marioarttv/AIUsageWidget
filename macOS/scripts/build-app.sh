@@ -3,8 +3,11 @@ set -euo pipefail
 widget_root="$(cd "$(dirname "$0")/../.." && pwd)"
 widget_build="$widget_root/macOS/build"
 widget_app="$widget_build/AI Usage Widget.app"
-swift build --package-path "$widget_root/macOS" -c release --jobs 4
-widget_bin="$(swift build --package-path "$widget_root/macOS" -c release --show-bin-path)"
+# AI_WIDGET_UNIVERSAL=1 builds for Apple silicon and Intel in one app, as the release does.
+widget_arch=()
+if [ "${AI_WIDGET_UNIVERSAL:-}" = 1 ]; then widget_arch=(--arch arm64 --arch x86_64); fi
+swift build --package-path "$widget_root/macOS" -c release --jobs 4 ${widget_arch[@]+"${widget_arch[@]}"}
+widget_bin="$(swift build --package-path "$widget_root/macOS" -c release ${widget_arch[@]+"${widget_arch[@]}"} --show-bin-path)"
 mkdir -p "$widget_app/Contents/MacOS" "$widget_app/Contents/Resources" "$widget_build/AppIcon.iconset"
 cp "$widget_bin/AIUsageWidget" "$widget_app/Contents/MacOS/AIUsageWidget"
 cp "$widget_root/macOS/Info.plist" "$widget_app/Contents/Info.plist"

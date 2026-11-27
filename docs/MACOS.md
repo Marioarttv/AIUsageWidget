@@ -2,7 +2,9 @@
 
 ## Install and run
 
-Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. Antigravity is optional (see [Antigravity](#antigravity)). The build targets the current Mac's architecture.
+The quickest way is the ready-made app from the [latest release](https://github.com/Marioarttv/AIUsageWidget/releases/latest): see [Install on macOS](../README.md#install-on-macos). It is a universal build (Apple silicon and Intel), signed ad hoc rather than notarized, so macOS asks once before opening it.
+
+To build it yourself: requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. Antigravity is optional (see [Antigravity](#antigravity)). The build targets the current Mac's architecture.
 
 ```sh
 ./macOS/scripts/install.sh
@@ -10,7 +12,7 @@ Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscript
 
 The installer puts the app in `~/Applications/AI Usage Widget.app` and opens it. Quit the app before reinstalling. The app is a menu-bar utility and does not add a Dock icon. Reopening it from Finder opens its menu-bar view. Only one instance runs at a time.
 
-The build uses an existing Apple Development signing identity when available, without creating certificates or downloading profiles. Override it with `AI_WIDGET_SIGNING_IDENTITY`; use `-` for ad-hoc local signing. A stable signing identity is recommended to retain Keychain access across rebuilds. This local build is not notarized for public distribution.
+`AI_WIDGET_UNIVERSAL=1 ./macOS/scripts/build-app.sh` builds for both architectures, as the release workflow does. The build uses an existing Apple Development signing identity when available, without creating certificates or downloading profiles. Override it with `AI_WIDGET_SIGNING_IDENTITY`; use `-` for ad-hoc local signing. A stable signing identity is recommended to retain Keychain access across rebuilds. This local build is not notarized for public distribution.
 
 ## Display and controls
 
@@ -95,6 +97,14 @@ With the installed app running, this requests a small runtime report:
 "$HOME/Applications/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --diagnostics
 cat "$HOME/Library/Application Support/AIUsageWidget/diagnostics.json"
 ```
+
+To draw the panel and the menu-bar item with built-in sample readings (fictional accounts, no sign-ins read and nothing sent), for screenshots such as the website's:
+
+```sh
+"macOS/build/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --render-demo site/img
+```
+
+It writes `macos-panel.png`, `macos-menubar-light.png` and `macos-menubar-dark.png` at 2× and exits. It has to run from inside the built app.
 
 `diagnostics.json` includes `claudeRenewals`, the number of sign-in renewals since launch, and under `antigravity` whether the CLI was found, its path, whether T3 Code manages it, and since when its sign-in has needed renewing.
 

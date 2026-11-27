@@ -40,6 +40,15 @@ if arguments.contains("--check") {
         exit(ok ? 0 : 1)
     }
     RunLoop.main.run()
+} else if let index = arguments.firstIndex(of: "--render-demo") {
+    let folder = URL(fileURLWithPath: arguments.dropFirst(index + 1).first ?? ".", isDirectory: true)
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        do { try DemoRender.run(folder: folder); exit(0) } catch {
+            FileHandle.standardError.write(Data("render-demo: \(error)\n".utf8)); exit(1)
+        }
+    }
 } else {
     let bundleID = Bundle.main.bundleIdentifier ?? "com.mariomanzocco.aiusagewidget"
     let other = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first { $0.processIdentifier != getpid() }
