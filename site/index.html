@@ -165,9 +165,9 @@ h3 { font: 700 21px/1.25 var(--display); margin: 0 0 6px; }
 .windows figure { margin: 0; }
 .windows figcaption { font-size: 14px; color: var(--muted); margin-top: 12px; }
 .shot-pair { display: flex; gap: 20px; align-items: flex-start; justify-content: center; }
-.shot-pair img { width: min(300px, 100%); filter: drop-shadow(0 18px 30px rgba(10, 20, 35, 0.25)); }
+.shot-pair img { border-radius: 14px; width: min(324px, 100%); filter: drop-shadow(0 18px 30px rgba(10, 20, 35, 0.25)); }
 .strip { margin-top: 20px; }
-.strip img { width: auto; max-height: 48px; }
+.strip img { width: 230px; height: auto; }
 
 /* Install tabs */
 .tabs { display: inline-flex; gap: 4px; padding: 4px; background: var(--paper-2); border-radius: 14px; margin-bottom: 36px; }
@@ -329,14 +329,20 @@ footer p { margin: 0; max-width: 52em; }
       <div class="windows">
         <div>
           <h2 id="windows-title">Just as much at home on Windows</h2>
-          <p class="intro">The Windows app is native too: the same cards on your desktop or on top, and a compact strip beside the taskbar clock with one number per provider. Hover for the reset time, click for the full widget.</p>
+          <p class="intro">The Windows app is native too: the same cards on your desktop or on top, in a dark, light or system theme, and a compact strip beside the taskbar clock with one number per provider. Hover for the reset time, click for the full widget.</p>
           <figure class="strip">
-            <img src="img/windows-strip-dark.png" alt="The taskbar strip beside the clock: Claude, ChatGPT and Gemini marks with what is left of each." height="48">
+            <picture>
+              <source srcset="img/windows-strip-dark.png" media="(prefers-color-scheme: dark)">
+              <img src="img/windows-strip-light.png" alt="The taskbar strip: Claude 68%, ChatGPT 41%, Gemini 97%." width="230" height="40">
+            </picture>
             <figcaption>The taskbar strip follows light and dark mode and steps aside for full-screen apps.</figcaption>
           </figure>
         </div>
         <figure class="shot-pair">
-          <img src="img/windows-panel-dark.png" alt="The widget on Windows in dark mode, showing Claude, two ChatGPT accounts and Antigravity." width="300">
+          <picture>
+            <source srcset="img/windows-panel-dark.png" media="(prefers-color-scheme: dark)">
+            <img src="img/windows-panel-light.png" alt="The widget on Windows: Claude 68% left, a ChatGPT account at 82%, a second ChatGPT account at 0% with its weekly limit used up, and Antigravity at 97%." width="324" height="590">
+          </picture>
         </figure>
       </div>
     </section>
@@ -389,7 +395,7 @@ cd AIUsageWidget
         <ol class="steps">
           <li><div>
             <h3>Download</h3>
-            <p>Download <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip">AIUsageWidget-windows-x64.zip</a>, or the <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip">ARM64 version</a> for ARM PCs such as Snapdragon laptops.</p>
+            <p>Download <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip">AIUsageWidget-windows-x64.zip</a>, or the <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip">ARM64 version</a> for ARM PCs such as Snapdragon laptops (not yet tested on real hardware).</p>
           </div></li>
           <li><div>
             <h3>Extract it to a permanent folder</h3>
