@@ -1,0 +1,78 @@
+name: Release
+
+# Push a tag such as v1.3.0 to build both apps and publish them as a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build, e.g. v1.3.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - run: swift test --package-path macOS
+      - name: Build universal app, ad-hoc signed
+        run: AI_WIDGET_UNIVERSAL=1 AI_WIDGET_SIGNING_IDENTITY=- ./macOS/scripts/build-app.sh
+      - name: Zip
+        run: ditto -c -k --keepParent "macOS/build/AI Usage Widget.app" AIUsageWidget-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: AIUsageWidget-macOS.zip
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish (self-contained, no .NET install needed)
+        shell: pwsh
+        run: |
+          dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o "out/AI Usage Widget"
+          $arch = '${{ matrix.rid }}'.Replace('win-', '')
+          Compress-Archive -Path "out/AI Usage Widget" -DestinationPath "AIUsageWidget-windows-$arch.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.rid }}
+          path: AIUsageWidget-windows-*.zip
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l *.zip
+          sha256sum *.zip > SHA256SUMS.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" *.zip SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" *.zip SHA256SUMS.txt --title "AI Usage Widget $TAG" --generate-notes \
+              --notes "Install guide: https://marioarttv.github.io/AIUsageWidget/#install. macOS: AIUsageWidget-macOS.zip (Apple silicon and Intel, macOS 13+). Windows: AIUsageWidget-windows-x64.zip, or -arm64 for ARM PCs (no .NET install needed). The apps are not code-signed: see the guide for the first launch."
+          fi

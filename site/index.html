@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Usage Widget</title>
+<meta name="description" content="A small desktop widget for macOS and Windows that shows how much of your Claude, ChatGPT/Codex and Gemini (Antigravity) subscription limits is left. Free and open source.">
+<meta property="og:title" content="AI Usage Widget">
+<meta property="og:description" content="See how much of your Claude, ChatGPT/Codex and Gemini limits is left, right on your desktop. Native for macOS and Windows.">
+<meta property="og:image" content="https://marioarttv.github.io/AIUsageWidget/img/icon.png">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="apple-touch-icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #e8edf1;
+  --paper-2: #dde4ea;
+  --ink: #15202b;
+  --muted: #566475;
+  --rule: #c5cfd8;
+  --panel: #11151b;
+  --button: #15202b;
+  --button-ink: #f3f6f8;
+  --claude: #e8946e;
+  --codex: #5ecfc4;
+  --gemini: #7a9efa;
+  --focus: #3f63d8;
+  --code-bg: #11151b;
+  --code-ink: #dfe6ec;
+  --desk: linear-gradient(160deg, #c9d6e1 0%, #b4c4d3 55%, #a8b9ca 100%);
+  --bar: rgba(244, 247, 250, 0.72);
+  --bar-ink: #15202b;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #171d24;
+    --paper-2: #1e262f;
+    --ink: #e6ecf1;
+    --muted: #9aa8b6;
+    --rule: #2f3944;
+    --button: #e6ecf1;
+    --button-ink: #11151b;
+    --focus: #8fa9ff;
+    --code-bg: #0d1116;
+    --desk: linear-gradient(160deg, #26313d 0%, #1d2731 60%, #18212a 100%);
+    --bar: rgba(30, 36, 44, 0.8);
+    --bar-ink: #e6ecf1;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #171d24; --paper-2: #1e262f; --ink: #e6ecf1; --muted: #9aa8b6; --rule: #2f3944;
+  --button: #e6ecf1; --button-ink: #11151b; --focus: #8fa9ff; --code-bg: #0d1116;
+  --desk: linear-gradient(160deg, #26313d 0%, #1d2731 60%, #18212a 100%);
+  --bar: rgba(30, 36, 44, 0.8); --bar-ink: #e6ecf1;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 17px/1.6 var(--body);
+  text-rendering: optimizeLegibility;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+.wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+
+/* Header */
+.site-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 20px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 18px/1 var(--display); text-decoration: none; }
+.brand img { width: 30px; height: 30px; }
+.site-head nav { display: flex; gap: 22px; font-size: 15px; }
+.site-head nav a { text-decoration: none; color: var(--muted); }
+.site-head nav a:hover { color: var(--ink); }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px); gap: 56px; align-items: center; padding-block: 40px 72px; }
+.hero h1 {
+  font: 800 clamp(42px, 6.2vw, 76px)/0.98 var(--display);
+  letter-spacing: -0.025em;
+  margin: 0 0 24px;
+  font-variation-settings: "opsz" 96;
+}
+.lede { font-size: 20px; line-height: 1.5; color: var(--muted); max-width: 34em; margin: 0 0 32px; }
+.lede strong { color: var(--ink); font-weight: 500; }
+.meters { display: flex; gap: 6px; margin: 0 0 28px; }
+.meters span { height: 8px; border-radius: 4px; }
+.meters .c { width: 72px; background: var(--claude); }
+.meters .o { width: 88px; background: var(--codex); }
+.meters .g { width: 91px; background: var(--gemini); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.button {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 22px; border-radius: 12px;
+  background: var(--button); color: var(--button-ink);
+  font: 600 16px/1 var(--body); text-decoration: none;
+  border: 2px solid var(--button);
+}
+.button.secondary { background: transparent; color: var(--ink); border-color: var(--rule); }
+.button.secondary:hover { border-color: var(--ink); }
+.button svg { width: 18px; height: 18px; flex: none; }
+.fine { margin: 18px 0 0; font-size: 14px; color: var(--muted); }
+
+/* The desktop scene: a menu bar with the real readings, the panel dropping from it. */
+.desk {
+  position: relative;
+  background: var(--desk);
+  border-radius: 22px;
+  padding: 0 28px 34px;
+  overflow: hidden;
+  isolation: isolate;
+}
+.menubar {
+  display: flex; justify-content: flex-end; align-items: center; gap: 14px;
+  margin: 0 -28px 18px; padding: 6px 18px;
+  background: var(--bar); color: var(--bar-ink);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  font: 500 13px/1 var(--body);
+}
+.menubar img { height: 28px; width: auto; border-radius: 6px; }
+.menubar .light { display: block; }
+.menubar .dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .menubar .light { display: none; }
+  :root:not([data-theme="light"]) .menubar .dark { display: block; }
+}
+:root[data-theme="dark"] .menubar .light { display: none; }
+:root[data-theme="dark"] .menubar .dark { display: block; }
+.desk .panel {
+  width: min(300px, 100%);
+  margin-left: auto;
+  margin-right: 6px;
+  filter: drop-shadow(0 24px 40px rgba(10, 20, 35, 0.35));
+  animation: drop 700ms cubic-bezier(.2, .8, .2, 1) 150ms both;
+}
+@keyframes drop { from { transform: translateY(-22px); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .desk .panel { animation: none; } }
+
+/* Sections */
+section { padding-block: 72px; border-top: 1px solid var(--rule); }
+h2 { font: 700 clamp(30px, 3.6vw, 42px)/1.08 var(--display); letter-spacing: -0.015em; margin: 0 0 16px; }
+h3 { font: 700 21px/1.25 var(--display); margin: 0 0 6px; }
+.intro { color: var(--muted); max-width: 38em; margin: 0 0 40px; font-size: 18px; }
+.two { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 48px; }
+
+.features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px 40px; margin: 0; padding: 0; list-style: none; }
+.features li { padding-left: 20px; border-left: 4px solid var(--rule); }
+.features li.claude { border-color: var(--claude); }
+.features li.codex { border-color: var(--codex); }
+.features li.gemini { border-color: var(--gemini); }
+.features p { margin: 0; color: var(--muted); }
+
+.windows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; }
+.windows figure { margin: 0; }
+.windows figcaption { font-size: 14px; color: var(--muted); margin-top: 12px; }
+.shot-pair { display: flex; gap: 20px; align-items: flex-start; justify-content: center; }
+.shot-pair img { width: min(300px, 100%); filter: drop-shadow(0 18px 30px rgba(10, 20, 35, 0.25)); }
+.strip { margin-top: 20px; }
+.strip img { width: auto; max-height: 48px; }
+
+/* Install tabs */
+.tabs { display: inline-flex; gap: 4px; padding: 4px; background: var(--paper-2); border-radius: 14px; margin-bottom: 36px; }
+.tabs button {
+  appearance: none; border: 0; cursor: pointer;
+  padding: 10px 22px; border-radius: 10px;
+  background: transparent; color: var(--muted);
+  font: 600 16px/1 var(--body);
+}
+.tabs button[aria-selected="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.tabpanel[hidden] { display: none; }
+.req { margin: 0 0 28px; color: var(--muted); }
+.req strong { color: var(--ink); font-weight: 600; }
+.steps { counter-reset: step; list-style: none; margin: 0 0 32px; padding: 0; display: grid; gap: 24px; max-width: 760px; }
+.steps > li { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; }
+.steps > li::before {
+  content: counter(step);
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 2px solid var(--ink);
+  font: 700 16px/1 var(--display);
+}
+.steps p { margin: 4px 0 0; }
+.steps ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+.steps ul strong { color: var(--ink); font-weight: 600; }
+kbd, code {
+  font-family: var(--mono); font-size: 0.86em;
+  background: var(--paper-2); padding: 1px 6px; border-radius: 5px;
+}
+details { max-width: 760px; border-top: 1px solid var(--rule); padding-top: 18px; }
+summary { cursor: pointer; font-weight: 600; }
+details p { color: var(--muted); }
+.code { position: relative; margin: 14px 0; }
+.code pre {
+  margin: 0; padding: 18px 20px; overflow-x: auto;
+  background: var(--code-bg); color: var(--code-ink);
+  border-radius: 12px; font: 400 14px/1.7 var(--mono);
+}
+.code pre code { background: none; padding: 0; font-size: inherit; }
+.copy {
+  position: absolute; top: 10px; right: 10px;
+  appearance: none; cursor: pointer;
+  border: 1px solid #3a4652; background: #1b232c; color: #dfe6ec;
+  border-radius: 8px; padding: 6px 10px; font: 500 13px/1 var(--body);
+}
+
+/* Providers */
+.providers { display: grid; gap: 0; max-width: 900px; }
+.provider { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; padding-block: 22px; border-bottom: 1px solid var(--rule); }
+.provider:first-child { border-top: 1px solid var(--rule); }
+.provider h3 { display: flex; align-items: center; gap: 10px; }
+.provider h3 i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.provider p { margin: 0; color: var(--muted); }
+.provider p + p { margin-top: 8px; }
+
+.privacy { columns: 2 320px; column-gap: 48px; max-width: 960px; padding: 0; margin: 0; list-style: none; }
+.privacy li { break-inside: avoid; margin-bottom: 22px; }
+.privacy p { margin: 0; color: var(--muted); }
+
+footer { border-top: 1px solid var(--rule); padding-block: 40px 56px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 40px; }
+footer p { margin: 0; max-width: 52em; }
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 16px; }
+  .two, .windows { grid-template-columns: 1fr; gap: 24px; }
+  .features { grid-template-columns: 1fr; }
+  .provider { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  .site-head nav { gap: 14px; font-size: 14px; }
+  .site-head nav .hide-sm { display: none; }
+  .lede { font-size: 18px; }
+  .desk { padding: 0 16px 24px; }
+  .menubar { margin: 0 -16px 14px; }
+  .desk .panel { margin-right: auto; }
+  .button { width: 100%; justify-content: center; }
+  .shot-pair { flex-direction: column; align-items: center; }
+  section { padding-block: 56px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site-head">
+    <a class="brand" href="#top" id="top"><img src="img/icon.png" alt="" width="30" height="30">AI Usage Widget</a>
+    <nav aria-label="Main">
+      <a href="#features" class="hide-sm">Features</a>
+      <a href="#install">Install</a>
+      <a href="#privacy" class="hide-sm">Privacy</a>
+      <a href="https://github.com/Marioarttv/AIUsageWidget">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <h1>Know what's left of your AI plans before you hit a limit.</h1>
+        <div class="meters" aria-hidden="true"><span class="c"></span><span class="o"></span><span class="g"></span></div>
+        <p class="lede">A small widget for <strong>macOS and Windows</strong> that shows the 5-hour and weekly limits of your <strong>Claude</strong>, <strong>ChatGPT/Codex</strong> and <strong>Gemini</strong> subscriptions, and tells you when they run low or reset.</p>
+        <div class="actions" id="downloads">
+          <a class="button" data-os="mac" href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-macOS.zip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+            Download for macOS</a>
+          <a class="button" data-os="win" href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+            Download for Windows</a>
+        </div>
+        <p class="fine">Free and open source under the MIT license. macOS 13+ (Apple silicon and Intel) · Windows 10 and 11. <a href="#install">Install guide</a></p>
+      </div>
+      <div class="desk" aria-label="The widget on a Mac desktop, opened from its menu-bar readings">
+        <div class="menubar">
+          <img class="light" src="img/macos-menubar-light.png" alt="Menu bar readings: Claude 72%, ChatGPT 44%, Gemini 91%" width="161" height="28">
+          <img class="dark" src="img/macos-menubar-dark.png" alt="Menu bar readings: Claude 72%, ChatGPT 44%, Gemini 91%" width="161" height="28">
+          <span>Thu 9:41</span>
+        </div>
+        <img class="panel" src="img/macos-panel.png" width="300" height="841"
+             alt="The widget panel: Claude 72% remaining with weekly limits below; a ChatGPT account at 88%; a second ChatGPT account at 0% because its weekly limit is used up; Antigravity 91%.">
+      </div>
+    </div>
+
+    <section id="features" aria-labelledby="features-title">
+      <div class="two">
+        <div>
+          <h2 id="features-title">Every limit, in one glance</h2>
+          <p class="intro">Coding with AI means watching several meters at once. The widget reads them from the tools you already use and keeps them on your desktop.</p>
+        </div>
+        <ul class="features">
+          <li class="claude">
+            <h3>Claude</h3>
+            <p>Your Pro or Max plan's 5-hour session, weekly limit and model limits such as Opus, across claude.ai and Claude Code.</p>
+          </li>
+          <li class="codex">
+            <h3>ChatGPT and Codex</h3>
+            <p>The Codex limits of your ChatGPT plan, for as many accounts as you use, each labelled with its email.</p>
+          </li>
+          <li class="gemini">
+            <h3>Gemini in Antigravity</h3>
+            <p>Gemini's 5-hour and weekly limits and Antigravity's shared Claude and GPT group, once its CLI is installed.</p>
+          </li>
+          <li>
+            <h3>What you can really use</h3>
+            <p>When a weekly limit runs out, the limits under it show 0% and when they come back, instead of a misleading full bar.</p>
+          </li>
+          <li>
+            <h3>Alerts that matter</h3>
+            <p>A notification when a 5-hour limit drops below 10%, and another once a limit has actually reset.</p>
+          </li>
+          <li>
+            <h3>Renewal dates</h3>
+            <p>Note when each plan renews or ends. Click the date on a card to change it in a small calendar.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="windows" aria-labelledby="windows-title">
+      <div class="windows">
+        <div>
+          <h2 id="windows-title">Just as much at home on Windows</h2>
+          <p class="intro">The Windows app is native too: the same cards on your desktop or on top, and a compact strip beside the taskbar clock with one number per provider. Hover for the reset time, click for the full widget.</p>
+          <figure class="strip">
+            <img src="img/windows-strip-dark.png" alt="The taskbar strip beside the clock: Claude, ChatGPT and Gemini marks with what is left of each." height="48">
+            <figcaption>The taskbar strip follows light and dark mode and steps aside for full-screen apps.</figcaption>
+          </figure>
+        </div>
+        <figure class="shot-pair">
+          <img src="img/windows-panel-dark.png" alt="The widget on Windows in dark mode, showing Claude, two ChatGPT accounts and Antigravity." width="300">
+        </figure>
+      </div>
+    </section>
+
+    <section id="install" aria-labelledby="install-title">
+      <h2 id="install-title">Install</h2>
+      <p class="intro">Download the app for your computer, then sign in to the tools whose plans you want to see. Both apps are unsigned hobby builds, so your system asks once before opening them.</p>
+
+      <div class="tabs" role="tablist" aria-label="Operating system">
+        <button role="tab" id="tab-mac" aria-controls="panel-mac" aria-selected="true">macOS</button>
+        <button role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" tabindex="-1">Windows</button>
+      </div>
+
+      <div class="tabpanel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" tabindex="0">
+        <p class="req"><strong>Needs</strong> macOS 13 Ventura or newer, on Apple silicon or Intel.</p>
+        <ol class="steps">
+          <li><div>
+            <h3>Download and unzip</h3>
+            <p>Download <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-macOS.zip">AIUsageWidget-macOS.zip</a> and double-click it in Downloads.</p>
+          </div></li>
+          <li><div>
+            <h3>Move it to Applications</h3>
+            <p>Drag <strong>AI Usage Widget</strong> into your Applications folder.</p>
+          </div></li>
+          <li><div>
+            <h3>Open it the first time</h3>
+            <p>The app isn't notarized by Apple, so macOS blocks the first launch:</p>
+            <ul>
+              <li><strong>macOS 15 and newer:</strong> click <em>Done</em> in the warning, open <em>System Settings → Privacy &amp; Security</em>, scroll down and click <em>Open Anyway</em>, then confirm.</li>
+              <li><strong>macOS 13 and 14:</strong> right-click the app, choose <em>Open</em>, then <em>Open</em> again.</li>
+              <li><strong>Or in Terminal:</strong> <code>xattr -dr com.apple.quarantine "/Applications/AI Usage Widget.app"</code></li>
+            </ul>
+          </div></li>
+          <li><div>
+            <h3>Allow notifications</h3>
+            <p>The panel appears on your desktop and the readings in the menu bar. Click the menu-bar item for the full view, and use <kbd>⋯</kbd> for settings such as <em>Launch at Login</em>. The pin keeps the panel above other windows.</p>
+          </div></li>
+        </ol>
+        <details>
+          <summary>Build from source instead</summary>
+          <p>Needs Xcode 15 or newer. The script builds the app, signs it with your Apple Development identity if you have one, installs it to <code>~/Applications</code> and opens it. Quit the widget before running it again to update.</p>
+          <div class="code"><pre><code>git clone https://github.com/Marioarttv/AIUsageWidget.git
+cd AIUsageWidget
+./macOS/scripts/install.sh</code></pre></div>
+        </details>
+      </div>
+
+      <div class="tabpanel" id="panel-win" role="tabpanel" aria-labelledby="tab-win" tabindex="0" hidden>
+        <p class="req"><strong>Needs</strong> 64-bit Windows 10 or 11. Everything else is included; you don't need to install .NET.</p>
+        <ol class="steps">
+          <li><div>
+            <h3>Download</h3>
+            <p>Download <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip">AIUsageWidget-windows-x64.zip</a>, or the <a href="https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip">ARM64 version</a> for ARM PCs such as Snapdragon laptops.</p>
+          </div></li>
+          <li><div>
+            <h3>Extract it to a permanent folder</h3>
+            <p>Right-click the zip, choose <em>Extract All…</em> and pick a folder you'll keep, for example <code>%LOCALAPPDATA%\Programs</code>. Keep the files together.</p>
+          </div></li>
+          <li><div>
+            <h3>Start it</h3>
+            <p>Open the <strong>AI Usage Widget</strong> folder and double-click <strong>AIUsageWidget.exe</strong>. The app isn't code-signed, so SmartScreen may say “Windows protected your PC”: click <em>More info</em>, then <em>Run anyway</em>.</p>
+          </div></li>
+          <li><div>
+            <h3>Make it yours</h3>
+            <p>The widget opens on top, and a usage strip appears beside the taskbar clock. In <kbd>⋯</kbd>, turn on <em>Start with Windows</em>. Click the pin to send the widget to the desktop behind your windows.</p>
+          </div></li>
+        </ol>
+        <details>
+          <summary>Build from source instead</summary>
+          <p>Needs the <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 SDK</a>. <code>START-WIDGET.cmd</code> builds the app into the <code>app</code> folder the first time and starts it; <code>SHOW-WIDGET.cmd</code> brings a running widget forward.</p>
+          <div class="code"><pre><code>git clone https://github.com/Marioarttv/AIUsageWidget.git
+cd AIUsageWidget
+.\START-WIDGET.cmd</code></pre></div>
+        </details>
+      </div>
+    </section>
+
+    <section id="connect" aria-labelledby="connect-title">
+      <h2 id="connect-title">Connect your subscriptions</h2>
+      <p class="intro">There's nothing to set up in the widget. It finds the sign-ins of the official tools; sign in once in each tool you use. A provider you don't use stays out of the way.</p>
+      <div class="providers">
+        <div class="provider">
+          <h3><i style="background: var(--claude)"></i>Claude</h3>
+          <div>
+            <p>Install <a href="https://code.claude.com/docs/en/setup">Claude Code</a> and sign in with your Pro or Max subscription.</p>
+            <p>On a Mac, if the card asks for access, choose <kbd>⋯</kbd> → <em>Connect Claude…</em> and allow the Keychain prompt.</p>
+          </div>
+        </div>
+        <div class="provider">
+          <h3><i style="background: var(--codex)"></i>ChatGPT / Codex</h3>
+          <div>
+            <p>Install the <a href="https://learn.chatgpt.com/docs/codex/cli">Codex CLI</a> and choose <em>Sign in with ChatGPT</em>.</p>
+            <p>More than one account? Sign them in to <a href="https://github.com/b-nnett/codex-subscription-router">Codex Subscription Router</a> and they appear by themselves, or add another Codex sign-in folder in <kbd>⋯</kbd> → <em>ChatGPT Accounts</em>.</p>
+          </div>
+        </div>
+        <div class="provider">
+          <h3><i style="background: var(--gemini)"></i>Antigravity</h3>
+          <div>
+            <p>Install the <a href="https://antigravity.google">Antigravity</a> CLI and sign in with your Google account. The card appears once the widget finds it.</p>
+            <p>Turn it off any time with <kbd>⋯</kbd> → <em>Show Antigravity</em>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy" aria-labelledby="privacy-title">
+      <h2 id="privacy-title">Your sign-ins stay yours</h2>
+      <p class="intro">The widget runs entirely on your computer and only ever asks for usage numbers.</p>
+      <ul class="privacy">
+        <li><h3>No account, no server</h3><p>There's no sign-up, analytics or telemetry. The only requests go to the providers themselves.</p></li>
+        <li><h3>No tokens spent</h3><p>It reads Claude's usage endpoint, the Codex CLI's rate-limit call and Antigravity's <code>/usage</code> command. It never starts a conversation.</p></li>
+        <li><h3>Nothing secret on disk</h3><p>Sign-in tokens are used in memory for those requests only and never saved or logged. The Antigravity token is never read.</p></li>
+        <li><h3>Light on your machine</h3><p>Native Swift and .NET apps, with no browser engine. They refresh every few minutes and slow down when you're not looking.</p></li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p><a href="https://github.com/Marioarttv/AIUsageWidget">Source on GitHub</a> · <a href="https://github.com/Marioarttv/AIUsageWidget/releases">Releases</a> · <a href="https://github.com/Marioarttv/AIUsageWidget/issues">Report a problem</a> · MIT license</p>
+    <p>Claude, ChatGPT, Codex, Gemini and Antigravity are trademarks of Anthropic, OpenAI and Google. This project isn't affiliated with or endorsed by them.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function select(tab, focus) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+    if (focus) tab.focus();
+  }
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener('click', function () { select(tab, false); });
+    tab.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        select(tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length], true);
+      }
+    });
+  });
+
+  // Put the visitor's own system first.
+  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+  if (/win/i.test(platform)) {
+    select(document.getElementById('tab-win'), false);
+    var row = document.getElementById('downloads');
+    row.insertBefore(row.querySelector('[data-os="win"]'), row.firstChild);
+  }
+  if (/arm|aarch/i.test(navigator.userAgent) && /win/i.test(platform)) {
+    document.querySelector('[data-os="win"]').href =
+      'https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip';
+  }
+
+  document.querySelectorAll('.code').forEach(function (block) {
+    var button = document.createElement('button');
+    button.className = 'copy';
+    button.type = 'button';
+    button.textContent = 'Copy';
+    button.addEventListener('click', function () {
+      var text = block.querySelector('code').textContent;
+      (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+        button.textContent = 'Copied';
+        setTimeout(function () { button.textContent = 'Copy'; }, 1600);
+      }, function () { button.textContent = 'Select and copy'; });
+    });
+    block.appendChild(button);
+  });
+})();
+</script>
+</body>
+</html>

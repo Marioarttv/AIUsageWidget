@@ -1,0 +1,37 @@
+name: Bug report
+description: Something doesn't work or shows the wrong numbers
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [macOS, Windows]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version and OS version
+      placeholder: e.g. 1.3.0 on macOS 15.2, or Windows 11 24H2
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which reading is affected?
+      multiple: true
+      options: [Claude, ChatGPT / Codex, Antigravity (Gemini), Notifications, Taskbar strip / menu bar, Other]
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of the connection check
+      description: |
+        macOS: `"/Applications/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --check` (or the copy in ~/Applications).
+        Windows: run `AIUsageWidget.exe --check`, then paste `%LOCALAPPDATA%\AIUsageWidget\check-result.json`.
+        It contains connection status and window counts only. Remove any email addresses you don't want to share.
+      render: json
