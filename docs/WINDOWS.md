@@ -12,7 +12,7 @@ Requirements:
 - Optional: the Antigravity CLI, signed in with a Google AI plan (see [Antigravity](#antigravity)).
 - Optional: Node.js and Claude Code 2.1.251 or newer for the Claude status-line feed.
 
-**Release zip.** Release zips are self-contained, so no .NET install is needed. Download the zip for your PC (`win-x64`, or `win-arm64` for ARM PCs) and extract it to a folder of your own, for example `%LOCALAPPDATA%\Programs\AI Usage Widget`. Then run `AIUsageWidget.exe`. Keep the files together in that folder. The widget installs nothing anywhere else, apart from its data folder (see [Privacy](#usage-connections-and-privacy)).
+**Release zip.** Release zips are self-contained, so no .NET install is needed. Download `AIUsageWidget-windows-x64.zip` (or `AIUsageWidget-windows-arm64.zip` for ARM PCs) from the [latest release](https://github.com/Marioarttv/AIUsageWidget/releases/latest) and extract it to a folder of your own, for example `%LOCALAPPDATA%\Programs`. The zip contains an `AI Usage Widget` folder; run `AIUsageWidget.exe` in it. The app isn't code-signed, so SmartScreen may ask first: choose **More info → Run anyway**. Keep the files together in that folder. The widget installs nothing anywhere else, apart from its data folder (see [Privacy](#usage-connections-and-privacy)).
 
 **From source.** You need the .NET 10 SDK. Double-click `START-WIDGET.cmd` in the repository. If the app hasn't been built yet, it is published into the ignored `app/` folder first; this framework-dependent build needs the .NET 10 Windows Desktop runtime. To build a self-contained copy like the release zips:
 

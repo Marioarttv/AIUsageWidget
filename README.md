@@ -99,7 +99,7 @@ Readings refresh every few minutes; **↻** refreshes now. The details, includin
 - Sign-in tokens are only used in memory for those requests. They are never written to the widget's files or logs, and the Antigravity token is never read at all.
 - Saved data is limited to recent readings, alert history and settings, in `~/Library/Application Support/AIUsageWidget` (macOS) or `%LOCALAPPDATA%\AIUsageWidget` (Windows).
 
-Claude's usage endpoint isn't a documented public API, so a provider change can break a reading until the widget is updated.
+**This is an unofficial tool, provided as is (see [License](#license)).** It reads your own sign-ins on your own computer and only asks for usage numbers, but providers can change or restrict that access at any time. Claude's usage endpoint isn't a documented public API, and Anthropic's [policy on subscription sign-ins](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) reserves the right to restrict how they're used. Use it at your own risk.
 
 ## Uninstall
 
