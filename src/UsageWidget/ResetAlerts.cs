@@ -1,7 +1,8 @@
 namespace UsageWidget;
 
 public sealed record ResetObservation(UsageWindow Window, DateTimeOffset UpdatedAt);
-public sealed record ResetAlert(string Id, UsageProvider Provider, string Label, double Remaining, DateTimeOffset ExpiresAt);
+// Account: the account's display name, such as its email, when a provider has several.
+public sealed record ResetAlert(string Id, UsageProvider Provider, string Label, double Remaining, DateTimeOffset ExpiresAt, string? Account = null);
 
 // Only a newer, fresh provider observation can confirm a reset. Countdown ticks cannot generate alerts.
 public sealed class ResetAlertLedger
@@ -18,14 +19,15 @@ public sealed class ResetAlertLedger
         return changed;
     }
 
-    public bool Observe(UsageProvider provider, UsageSnapshot? snapshot, bool enabled, DateTimeOffset now)
+    // source: the reading's alert key ("Codex@<account>" for an additional sign-in); the provider's name for its default one.
+    public bool Observe(UsageProvider provider, UsageSnapshot? snapshot, bool enabled, DateTimeOffset now, string? source = null, string? account = null)
     {
         if (snapshot is null || Math.Abs((snapshot.UpdatedAt - now).TotalSeconds) >= 120) return false;
         bool changed = false;
         foreach (var window in snapshot.Windows)
         {
             if (!double.IsFinite(window.UsedPercent)) continue;
-            string key = $"{provider}:{window.Key}";
+            string key = $"{source ?? provider.ToString()}:{window.Key}";
             Observations.TryGetValue(key, out var previous);
             if (previous is not null && snapshot.UpdatedAt <= previous.UpdatedAt) continue;
             if (previous?.Window.ResetsAt is long oldReset)
@@ -39,8 +41,11 @@ public sealed class ResetAlertLedger
                     ? window.ResetsAt is long reset ? advanced && reset > snapshot.UpdatedAt.ToUnixTimeSeconds() : cleared
                     : advanced && cleared;
                 string id = $"{key}:reset:{oldReset}";
-                if (didReset && enabled && !Delivered.Contains(id) && Pending.All(alert => alert.Id != id))
-                    Pending.Add(new(id, provider, window.Label, Math.Clamp(100 - window.UsedPercent, 0, 100), now.AddMinutes(30)));
+                // Only a window that was used can usefully reset (unused windows of some providers report a boundary that keeps
+                // moving), and a window under a used-up longer limit stays at 0% after its own reset.
+                bool useful = old.UsedPercent > 0 && snapshot.Blocker(window, now) is null;
+                if (didReset && useful && enabled && !Delivered.Contains(id) && Pending.All(alert => alert.Id != id))
+                    Pending.Add(new(id, provider, window.Label, Math.Clamp(100 - window.UsedPercent, 0, 100), now.AddMinutes(30), account));
             }
             // Disabled alerts still advance the baseline, without replaying those resets when re-enabled.
             Observations[key] = new(window, snapshot.UpdatedAt);

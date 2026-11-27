@@ -29,6 +29,18 @@ public static class NativeDesktop
         return info.Work;
     }
 
+    // The work area of the monitor the window is on, in device-independent pixels.
+    public static Rect WorkAreaDips(Window window)
+    {
+        GetWindowRect(Handle(window), out var rect);
+        var area = WorkArea(rect);
+        var transform = PresentationSource.FromVisual(window)?.CompositionTarget?.TransformFromDevice ?? System.Windows.Media.Matrix.Identity;
+        var topLeft = transform.Transform(new Point(area.Left, area.Top));
+        var bottomRight = transform.Transform(new Point(area.Right, area.Bottom));
+        var result = new Rect(topLeft, bottomRight);
+        return result.IsEmpty || result.Height < 1 ? SystemParameters.WorkArea : result;
+    }
+
     public static void CenterOnPrimary(Window window) {
         GetWindowRect(Handle(window), out var rect);
         var area = WorkArea(new RECT(), 1 /* MONITOR_DEFAULTTOPRIMARY */);
