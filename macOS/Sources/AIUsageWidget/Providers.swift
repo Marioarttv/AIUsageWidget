@@ -130,6 +130,95 @@ enum CodexReader {
     }
 }
 
+actor AntigravityProvider {
+    private var lastAttempt = Date.distantPast
+    /// The Keychain sign-in (by its last write time) for which the CLI asked for a new login, and when. The CLI isn't
+    /// started for it again until the sign-in changes, a manual refresh, or half an hour later, so it doesn't sit waiting
+    /// for a login on every refresh. The browser guard makes a retry harmless.
+    private var lapsed: (signIn: String, at: Date)?
+    private(set) var lastExecutable: AntigravityCLI.Executable?
+    private let workspace: URL
+    init(workspace: URL) { self.workspace = workspace }
+    var lapsedSince: Date? { lapsed?.at }
+
+    func refresh(minimumGap: TimeInterval = 150, manual: Bool = false) async -> ProviderResult {
+        // ↻ retries a sign-in that needed renewing even when it comes too soon after the last attempt to run now.
+        if manual || lapsed.map({ Date().timeIntervalSince($0.at) > 1800 }) == true { lapsed = nil }
+        guard Date().timeIntervalSince(lastAttempt) >= minimumGap else { return .skipped }
+        lastAttempt = Date()
+        let workspace = workspace, known = lapsed
+        let (result, cli, signIn, needsLogin) = await Task.detached(priority: .utility) {
+            () -> (ProviderResult, AntigravityCLI.Executable?, String?, Bool) in
+            guard let cli = AntigravityCLI.executable() else { return (.failure("Install the Antigravity CLI to connect"), nil, nil, false) }
+            let how = cli.managedByT3 ? "Open Antigravity in T3 Code" : "Run \(cli.url.lastPathComponent) in Terminal"
+            guard let signIn = SecurityTool.modified(service: AntigravityCLI.keychainService, account: AntigravityCLI.keychainAccount) else {
+                return (.failure("Not signed in · " + how), cli, nil, false)
+            }
+            if signIn == known?.signIn { return (.failure("Sign-in expired · " + how), cli, signIn, true) }
+            do {
+                switch try AntigravityReader.read(cli.url, workspace: workspace) {
+                case .reading(let snapshot): return (.reading(snapshot), cli, signIn, false)
+                case .signIn: return (.failure("Sign-in expired · " + how), cli, signIn, true)
+                case .failure(let message): return (.failure(message), cli, signIn, false)
+                }
+            } catch ProviderError.timedOut { return (.failure("Refresh timed out · retrying automatically"), cli, signIn, false) }
+            catch { return (.failure("Antigravity refresh failed · showing last reading"), cli, signIn, false) }
+        }.value
+        lastExecutable = cli
+        if needsLogin, let signIn { if lapsed?.signIn != signIn { lapsed = (signIn, Date()) } } else { lapsed = nil }
+        return result
+    }
+}
+
+/// Runs the CLI's `/usage` command once, with no shell, model turn, browser, update check, or log file.
+enum AntigravityReader {
+    static func read(_ executable: URL, workspace: URL) throws -> AntigravityCLI.Outcome {
+        // An empty private folder as the workspace, so the CLI has nothing to look at.
+        try? FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let process = Process(), output = Pipe(), errors = Pipe()
+        process.executableURL = executable
+        process.arguments = AntigravityCLI.arguments
+        process.environment = AntigravityCLI.environment(ProcessInfo.processInfo.environment)
+        process.currentDirectoryURL = workspace
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                let end = Date().addingTimeInterval(1)
+                while process.isRunning && Date() < end { usleep(10_000) }
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            }
+            process.waitUntilExit()
+            try? output.fileHandleForReading.close()
+            try? errors.fileHandleForReading.close()
+        }
+        let out = output.fileHandleForReading.fileDescriptor, err = errors.fileHandleForReading.fileDescriptor
+        var open = [out, err]
+        var stdout = Data(), stderr = Data()
+        let deadline = Date().addingTimeInterval(35)
+        while !open.isEmpty {
+            guard Date() < deadline else { throw ProviderError.timedOut }
+            var descriptors = open.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
+            let ready = poll(&descriptors, nfds_t(descriptors.count), 500)
+            if ready < 0 { if errno == EINTR { continue }; throw ProviderError.disconnected }
+            for descriptor in descriptors where descriptor.revents != 0 {
+                var bytes = [UInt8](repeating: 0, count: 8192)
+                let count = Darwin.read(descriptor.fd, &bytes, bytes.count)
+                if count <= 0 { open.removeAll { $0 == descriptor.fd }; continue }
+                if descriptor.fd == out { stdout.append(contentsOf: bytes.prefix(count)) }
+                else { stderr.append(contentsOf: bytes.prefix(count)) }
+                guard stdout.count + stderr.count <= 2_000_000 else { throw ProviderError.invalidResponse }
+            }
+            // Signed out, the CLI would wait for a browser login; stop it at once instead.
+            if AntigravityCLI.asksForLogin(stderr) { return .signIn }
+        }
+        return AntigravityCLI.outcome(stdout: stdout)
+    }
+}
+
 actor ClaudeProvider {
     private var lastAttempt = Date.distantPast
     private var backoffUntil = Date.distantPast

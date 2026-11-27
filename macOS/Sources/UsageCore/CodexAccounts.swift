@@ -10,6 +10,7 @@ public struct UsageSource: Hashable, Codable, Identifiable {
     public var id: String { account.map { provider.rawValue + "@" + $0 } ?? provider.rawValue }
     public static let claude = UsageSource(provider: .claude)
     public static let codex = UsageSource(provider: .codex)
+    public static let antigravity = UsageSource(provider: .antigravity)
 }
 
 /// A ChatGPT sign-in that Codex can read subscription limits for.
