@@ -51,13 +51,15 @@ public sealed class TrayIcon : IDisposable
         Register();
     }
 
-    public void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now)
+    public void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now) =>
+        Update(TrayReading.Create(UsageProvider.Claude, claude, now), TrayReading.Create(UsageProvider.Codex, codex, now), null);
+
+    public void Update(TrayReading cl, TrayReading cx, TrayReading? gemini)
     {
         if (disposed) return;
-        var cl = TrayReading.Create(UsageProvider.Claude, claude, now);
-        var cx = TrayReading.Create(UsageProvider.Codex, codex, now);
         static string Percent(string number) => number == "—" ? number : number + "%";
-        string tip = $"AI Usage · Claude {Percent(cl.Number)} · ChatGPT/Codex {Percent(cx.Number)} remaining\nClick to open · Right-click for settings";
+        string tip = $"AI Usage · Claude {Percent(cl.Number)} · ChatGPT {Percent(cx.Number)}" + (gemini is null ? "" : $" · Gemini {Percent(gemini.Number)}")
+            + " remaining\nClick to open · Right-click for settings";
         if (tip.Length > 127) tip = tip[..127];
         bool changed = data.Tip != tip;
         data.Tip = tip;

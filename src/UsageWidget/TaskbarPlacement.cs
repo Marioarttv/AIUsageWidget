@@ -10,11 +10,14 @@ internal sealed record TaskbarState(IntPtr Handle, Rect Bounds, Rect Monitor, Re
 internal static class TaskbarPlacement
 {
     // All placement arithmetic uses physical screen pixels, including monitors with negative origins.
-    internal static Rect? Calculate(TaskbarState state, IReadOnlyList<Rect>? buttons)
+    // Strip widths in device-independent pixels: Claude and ChatGPT, and with Antigravity's Gemini mark.
+    internal const double NarrowWidth = 150, WideWidth = 214;
+
+    internal static Rect? Calculate(TaskbarState state, IReadOnlyList<Rect>? buttons, double stripWidth = NarrowWidth)
     {
         var bar = state.Bounds;
         var screen = state.Monitor;
-        double scale = state.Scale, width = 150 * scale, height = 30 * scale, gap = 6 * scale;
+        double scale = state.Scale, width = stripWidth * scale, height = 30 * scale, gap = 6 * scale;
         if (!state.Visible || state.Fullscreen || bar.IsEmpty || screen.IsEmpty || screen.Width < width || screen.Height < height)
             return null;
         var visible = Rect.Intersect(bar, screen);

@@ -1,12 +1,18 @@
 <Application x:Class="UsageWidget.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
+    <!-- Theme colours; Palette.Apply replaces them when the theme changes. -->
     <SolidColorBrush x:Key="Ink" Color="#F0F3F7"/>
     <SolidColorBrush x:Key="Muted" Color="#9AA6B7"/>
+    <SolidColorBrush x:Key="ButtonInk" Color="#D4DCE7"/>
+    <SolidColorBrush x:Key="ButtonHover" Color="#263244"/>
+    <SolidColorBrush x:Key="IconInk" Color="#8390A2"/>
+    <SolidColorBrush x:Key="TooltipBack" Color="#202B3D"/>
+    <SolidColorBrush x:Key="TooltipBorder" Color="#65758C"/>
     <!-- Text colour and font are inherited from the window. App-wide TextBlock styles would also reach menus and icon glyphs. -->
     <Style TargetType="ToolTip">
-      <Setter Property="Background" Value="#202B3D"/>
-      <Setter Property="Foreground" Value="#F0F3F7"/>
-      <Setter Property="BorderBrush" Value="#65758C"/>
+      <Setter Property="Background" Value="{DynamicResource TooltipBack}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource TooltipBorder}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Padding" Value="11,8"/>
       <Setter Property="FontFamily" Value="Segoe UI"/>
@@ -15,12 +21,17 @@
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}" MaxWidth="362"><ContentPresenter><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="Button">
-      <Setter Property="Foreground" Value="#D4DCE7"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,5"/><Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#263244"/><Setter Property="Foreground" Value="#F0F3F7"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Foreground" Value="{DynamicResource ButtonInk}"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,5"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonHover}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="#8390A2"/>
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/><Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{DynamicResource IconInk}"/>
       <Setter Property="Width" Value="24"/><Setter Property="Height" Value="22"/><Setter Property="Padding" Value="0"/>
+    </Style>
+    <!-- A plain button whose look is drawn entirely by its content: the renewal-date chip and the calendar's day cells. -->
+    <Style x:Key="BareButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><ContentPresenter/></ControlTemplate></Setter.Value></Setter>
     </Style>
   </Application.Resources>
 </Application>

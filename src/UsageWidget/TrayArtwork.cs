@@ -38,9 +38,11 @@ internal static class TrayArtwork
 
     internal static BitmapSource Render(UsageProvider provider, string? number, TrayAppearance appearance)
     {
-        Color color = appearance.HighContrast ? appearance.TextColor : provider == UsageProvider.Claude
-            ? (appearance.Light ? Color.FromRgb(0x9B, 0x48, 0x25) : Color.FromRgb(0xE8, 0xA2, 0x80))
-            : (appearance.Light ? Color.FromRgb(0x17, 0x65, 0x4A) : Color.FromRgb(0x9B, 0xDC, 0xBF));
+        Color color = appearance.HighContrast ? appearance.TextColor : provider switch {
+            UsageProvider.Claude => appearance.Light ? Color.FromRgb(0x9B, 0x48, 0x25) : Color.FromRgb(0xE8, 0xA2, 0x80),
+            UsageProvider.Codex => appearance.Light ? Color.FromRgb(0x17, 0x65, 0x4A) : Color.FromRgb(0x9B, 0xDC, 0xBF),
+            _ => appearance.Light ? Color.FromRgb(0x34, 0x58, 0xC4) : Color.FromRgb(0xA0, 0xB8, 0xF6),
+        };
         var brush = new SolidColorBrush(color);
         var visual = new DrawingVisual();
         TextOptions.SetTextRenderingMode(visual, TextRenderingMode.Grayscale);
