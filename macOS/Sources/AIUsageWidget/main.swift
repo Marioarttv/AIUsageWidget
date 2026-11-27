@@ -5,13 +5,18 @@ let arguments = CommandLine.arguments
 if arguments.contains("--check") {
     signal(SIGPIPE, SIG_IGN)
     Task {
-        // Checks every tracked ChatGPT/Codex sign-in, using the widget's saved account choices.
+        // Checks Claude, every tracked ChatGPT/Codex sign-in (using the widget's saved account choices), and Antigravity.
         let defaults = UserDefaults.standard
         let accounts = CodexAccounts.tracked(CodexAccounts.discover(folders: defaults.stringArray(forKey: "codexFolders") ?? []),
                                              on: Set(defaults.stringArray(forKey: "codexAccountsOn") ?? []),
                                              off: Set(defaults.stringArray(forKey: "codexAccountsOff") ?? []))
         let results = await withTaskGroup(of: (String, String?, ProviderResult).self) { group in
             group.addTask { ("claude", nil, await ClaudeProvider().refresh()) }
+            // Antigravity is checked when its CLI is installed and the widget shows it.
+            if defaults.object(forKey: "showAntigravity") as? Bool ?? true, AntigravityCLI.executable() != nil {
+                let workspace = UsageModel.dataDirectory.appendingPathComponent("antigravity-workspace")
+                group.addTask { ("antigravity", nil, await AntigravityProvider(workspace: workspace).refresh()) }
+            }
             for account in accounts {
                 group.addTask { (account.source.id, account.email, await CodexProvider(home: account.home).refresh()) }
             }

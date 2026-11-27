@@ -131,6 +131,15 @@ public enum SecurityTool {
         return nil
     }
 
+    /// When an item was last written (its `mdat` attribute), or nil when there is no such item.
+    /// Reads attributes only, never the secret.
+    public static func modified(service: String, account: String) -> String? {
+        guard let data = run(["find-generic-password", "-s", service, "-a", account]),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return text.split(separator: "\n").first { $0.contains("\"mdat\"<timedate>=") }
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    }
+
     /// Writes as Claude Code does: hex payload on stdin, so the secret never appears in a process listing.
     public static func write(service: String, account: String, data: Data) -> Bool {
         guard !service.contains("\""), !account.contains("\"") else { return false }

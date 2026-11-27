@@ -57,7 +57,7 @@ final class CodexAccountsTests: XCTestCase {
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let end = Date(timeIntervalSince1970: 1_794_911_107) // 17 Nov 2026
         XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-86_400), calendar: calendar).hasPrefix("Renews or ends "))
-        XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(86_400), calendar: calendar).hasPrefix("Paid period ended "))
+        XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(86_400), calendar: calendar).hasPrefix("Paid until "))
         // The year is shown only when it isn't the current one.
         XCTAssertFalse(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-90 * 86_400), calendar: calendar).contains("2026"))
         XCTAssertTrue(UsageFormatting.paidPeriod(end, now: end.addingTimeInterval(-365 * 86_400), calendar: calendar).contains("2026"))

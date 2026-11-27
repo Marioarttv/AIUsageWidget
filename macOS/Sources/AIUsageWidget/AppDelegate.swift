@@ -37,15 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         panel.isMovableByWindowBackground = false
         panel.animationBehavior = .none
         panel.delegate = self
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Before the first layout, so the panel never opens taller than its display.
+        updateHeightLimits()
         hosting = NSHostingView(rootView: WidgetView(model: model))
         hosting.sizingOptions = [.intrinsicContentSize]
         panel.contentView = hosting
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.target = self; button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.imagePosition = .imageOnly
-            button.toolTip = "AI Usage · Claude and Codex remaining allowance\nClick for allowance and reset times."
+            button.toolTip = "AI Usage · Claude, Codex and Antigravity remaining allowance\nClick for allowance and reset times."
             button.setAccessibilityLabel("AI Usage Widget menu bar")
         }
         popover.behavior = .transient
@@ -57,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         model.onShow = { [weak self] in self?.reposition() }
         model.panelCovered = { [weak self] in self?.panelCovered() ?? false }
         model.notifications.onOpen = { [weak self] in self?.showPopover() }
+        // A transient popover would close when the calendar card, a separate window, is clicked.
+        PlanDatePanel.shared.onOpen = { [weak self] window in
+            guard let self, window === self.popover.contentViewController?.view.window else { return }
+            self.popover.behavior = .semitransient
+        }
+        PlanDatePanel.shared.onClose = { [weak self] in self?.popover.behavior = .transient }
         model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.updatePresentation() }
         }.store(in: &subscriptions)
@@ -70,13 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func updatePresentation() {
         guard panel != nil else { return }
-        let title = model.menuTitle
+        // The tooltip names each account, so it decides when to redraw too.
+        let title = model.menuDetails.joined(separator: "\n")
         if title != statusTitle, let button = statusItem.button {
             statusTitle = title
             let readings = model.menuReadings
             button.image = StatusIcon.image(readings)
-            button.setAccessibilityTitle(title)
-            button.toolTip = "AI Usage · remaining allowance\n" + readings.map { "\($0.name): \($0.value)" }.joined(separator: "\n")
+            button.setAccessibilityTitle(model.menuTitle)
+            button.toolTip = "AI Usage · remaining allowance\n" + model.menuDetails.joined(separator: "\n")
                 + "\nClick for allowance and reset times."
         }
         let height = ceil(hosting.fittingSize.height)
@@ -98,7 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         panel.level = model.topmost ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         panel.collectionBehavior = model.topmost ? [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             : [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        if model.panelVisible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+        if model.panelVisible { panel.orderFrontRegardless() } else {
+            panel.orderOut(nil)
+            if PlanDatePanel.shared.anchorWindow === panel { PlanDatePanel.shared.close() }
+        }
     }
     private func restorePosition() {
         let defaults = UserDefaults.standard
@@ -120,12 +132,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             return (aa.isNull ? 0 : aa.width * aa.height) < (bb.isNull ? 0 : bb.width * bb.height)
         } ?? NSScreen.main
         guard let area = best?.visibleFrame else { return }
+        updateHeightLimits()
         let x = max(area.minX + 8, min(frame.minX, area.maxX - frame.width - 8))
         let y = max(area.minY + 8, min(frame.minY, area.maxY - frame.height - 8))
         if x != frame.minX || y != frame.minY { panel.setFrameOrigin(NSPoint(x: x, y: y)) }
     }
+    /// The panel and the menu-bar view scroll their cards rather than run off a short display.
+    private func updateHeightLimits() {
+        let frame = panel.frame
+        let screen = NSScreen.screens.max { a, b in
+            let aa = a.visibleFrame.intersection(frame), bb = b.visibleFrame.intersection(frame)
+            return (aa.isNull ? 0 : aa.width * aa.height) < (bb.isNull ? 0 : bb.width * bb.height)
+        } ?? NSScreen.main
+        if let area = screen?.visibleFrame {
+            let limit = area.height - 16
+            if abs(model.maxPanelHeight - limit) > 1 { model.maxPanelHeight = limit }
+        }
+        // The popover hangs below the menu bar with its arrow, and keeps clear of the Dock.
+        if let area = (statusItem?.button?.window?.screen ?? NSScreen.main)?.visibleFrame {
+            let limit = area.height - 36
+            if abs(model.maxPopoverHeight - limit) > 1 { model.maxPopoverHeight = limit }
+        }
+    }
     func windowDidMove(_ notification: Notification) {
         guard !resizing else { return }
+        updateHeightLimits()
         positionSave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -135,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         positionSave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
-    @objc private func screensChanged() { clampToDisplay() }
+    @objc private func screensChanged() { updateHeightLimits(); clampToDisplay() }
     /// Whether one visible window above the panel contains it entirely. Uses window bounds only.
     private func panelCovered() -> Bool {
         guard panel.isVisible,
@@ -177,7 +208,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         model.popoverVisible = true
         Task { await model.updateNotificationStatus() }
     }
-    func popoverDidClose(_ notification: Notification) { model.popoverVisible = false }
+    func popoverDidClose(_ notification: Notification) {
+        model.popoverVisible = false
+        if PlanDatePanel.shared.anchorWindow === popover.contentViewController?.view.window { PlanDatePanel.shared.close() }
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showPopover(); return false }
     func applicationWillTerminate(_ notification: Notification) {
         positionSave?.cancel()
