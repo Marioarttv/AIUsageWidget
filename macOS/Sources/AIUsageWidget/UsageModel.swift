@@ -109,7 +109,9 @@ final class UsageModel: ObservableObject {
     private var workspaceObservers: [NSObjectProtocol] = []
     nonisolated static let dataDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AIUsageWidget")
 
-    init() {
+    /// `demo` shows built-in sample readings for screenshots, without reading sign-ins, the disk or the network.
+    init(demo: Bool = false) {
+        if demo { applyDemo(); return }
         try? FileManager.default.createDirectory(at: Self.dataDirectory, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
@@ -455,7 +457,7 @@ final class UsageModel: ObservableObject {
     }
     private func writeDiagnostics(window: NSWindow, claudeKeychainReads: Int, claudeRenewals: Int, antigravity: [String: Any]) {
         let data: [String: Any] = [
-            "version": "1.2.0", "startedAt": startedAt.timeIntervalSince1970,
+            "version": "1.3.0", "startedAt": startedAt.timeIntervalSince1970,
             "refreshCount": refreshCount, "refreshing": refreshing, "suspended": suspended,
             "windowVisible": window.isVisible, "windowLevel": window.level.rawValue,
             "mode": topmost ? "floating" : "desktop", "menuTitle": menuTitle,
@@ -474,3 +476,48 @@ final class UsageModel: ObservableObject {
         }
     }
 }
+
+extension UsageModel {
+    /// Fictional readings for `--render-demo`: Claude, two ChatGPT accounts (one with a used-up week) and Antigravity.
+    fileprivate func applyDemo() {
+        let now = Date()
+        func at(_ hours: Double) -> Date { now.addingTimeInterval(hours * 3600) }
+        func window(_ id: String, _ label: String, used: Double, hours: Double, minutes: Int, pool: String? = nil) -> UsageWindow {
+            UsageWindow(id: id, label: label, usedPercent: used, resetsAt: at(hours), minutes: minutes, pool: pool)
+        }
+        let main = CodexAccount(key: nil, home: nil, email: "you@example.com", plan: "pro", accountID: "demo-main",
+                                origin: .main, paidUntil: at(24 * 17))
+        let second = CodexAccount(key: "demo-second", home: nil, email: "team@example.com", plan: "plus", accountID: "demo-second",
+                                  origin: .router, paidUntil: at(24 * 9))
+        codexAccounts = [main, second]
+        antigravityInstalled = true
+        sources = [.claude, main.source, second.source, .antigravity]
+        let updated = now.addingTimeInterval(-60)
+        services = [
+            UsageSource.claude.id: ServiceState(snapshot: UsageSnapshot(updatedAt: updated, windows: [
+                window("five_hour", "5-hour session", used: 28, hours: 2.6, minutes: 300),
+                window("seven_day", "Weekly", used: 41, hours: 24 * 3 + 5, minutes: 10080),
+                window("seven_day_opus", "Weekly · Opus", used: 63, hours: 24 * 3 + 5, minutes: 10080, pool: "seven_day_opus"),
+            ], plan: "Max"), status: nil),
+            main.source.id: ServiceState(snapshot: UsageSnapshot(updatedAt: updated, windows: [
+                window("codex:primary", "5-hour session", used: 12, hours: 4.1, minutes: 300),
+                window("codex:secondary", "Weekly", used: 37, hours: 24 * 5 + 2, minutes: 10080),
+            ], plan: "pro"), status: nil),
+            second.source.id: ServiceState(snapshot: UsageSnapshot(updatedAt: updated, windows: [
+                window("codex:primary", "5-hour session", used: 20, hours: 1.2, minutes: 300),
+                window("codex:secondary", "Weekly", used: 100, hours: 24 * 1 + 7, minutes: 10080),
+            ], plan: "plus"), status: nil),
+            UsageSource.antigravity.id: ServiceState(snapshot: UsageSnapshot(updatedAt: updated, windows: [
+                window("gemini-5h", "Gemini · 5-hour session", used: 9, hours: 3.4, minutes: 300, pool: "Gemini Models"),
+                window("gemini-weekly", "Gemini · Weekly", used: 22, hours: 24 * 6, minutes: 10080, pool: "Gemini Models"),
+                window("3p-5h", "Claude and GPT · 5-hour session", used: 5, hours: 3.4, minutes: 300, pool: "Claude and GPT models"),
+                window("3p-weekly", "Claude and GPT · Weekly", used: 30, hours: 24 * 6, minutes: 10080, pool: "Claude and GPT models"),
+            ]), status: nil),
+        ]
+        var day = DateComponents(); day.day = 26
+        let renewal = Calendar.current.nextDate(after: now, matching: day, matchingPolicy: .nextTime) ?? at(24 * 20)
+        planDates = [UsageSource.claude.id: ManualPlanDate(date: renewal, cycle: .monthly)]
+        self.now = now
+    }
+}
+
