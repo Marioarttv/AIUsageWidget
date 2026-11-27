@@ -3,9 +3,11 @@ AI Usage Widget
 
 Start
 -----
-Double-click AIUsageWidget.exe or START-WIDGET.cmd.
-The app uses the .NET 10 Windows Desktop runtime already installed on this PC.
-Keep the executable and its accompanying files in this folder.
+Double-click AIUsageWidget.exe (or START-WIDGET.cmd in the source folder).
+Release zips include everything they need; a build from source uses the
+.NET 10 Windows Desktop runtime installed on this PC.
+Keep the executable and its accompanying files together in this folder,
+for example %LOCALAPPDATA%\Programs\AI Usage Widget.
 Launching it again brings the existing widget into an always-on-top view.
 If you cannot find it, double-click SHOW-WIDGET.cmd. This brings it forward
 and recenters it on the primary monitor. A taskbar entry is available when
@@ -15,14 +17,18 @@ Controls
 --------
 Drag the title area to move the widget. Its position is saved.
 The pin switches between Always on top and On desktop.
-The refresh button refreshes Claude and Codex; both refresh automatically
-every 3 minutes.
+The refresh button refreshes everything; readings also refresh
+automatically every 3 minutes.
 Hover over a reset countdown to see the exact local reset date and time.
+Each subscription has a card. Further limits take one line each. When the
+cards are taller than the screen, scroll them with the mouse wheel.
+Theme (three-dot menu): Dark (default), Light, or Match Windows.
 The three-dot menu and the tray icon menu provide settings, Hide, and Quit.
 When a 5-hour limit drops below 10% remaining, a Windows notification is
 shown once for that window. Turn this off with Low 5-hour limit alerts.
-Reset notifications are also enabled by default for Claude and ChatGPT/Codex,
-including weekly and model-specific limits. A fresh reading must confirm a
+Reset notifications are also enabled by default for Claude, ChatGPT/Codex
+and Antigravity, including weekly and model-specific limits. Windows that
+were not used before the reset are skipped. A fresh reading must confirm a
 reset; the countdown reaching zero alone does not trigger a notification.
 Click the notification to open the widget. Reset history survives restarts.
 Simultaneous notifications wait their turn instead of replacing each other.
@@ -36,9 +42,11 @@ Click the taskbar strip or the app's tray icon to show the widget.
 
 Usage beside the clock
 ----------------------
-The taskbar strip shows the Claude and ChatGPT logos, each with a matching-color
-number: the PERCENTAGE REMAINING in the shortest window (usually five
-hours). The ChatGPT logo shows your Codex allowance. A dash means that a
+The taskbar strip shows the Claude and ChatGPT logos (and the Gemini logo
+when Antigravity is shown), each with a matching-color number: the
+PERCENTAGE REMAINING in the shortest window (usually five hours). The
+ChatGPT logo shows your Codex allowance; with several ChatGPT accounts it
+shows the average of what each account has left (hover for each one). A dash means that a
 reading is missing or the reset has passed and a fresh reading is needed.
 Readings continue updating when you hide the desktop widget.
 
@@ -63,6 +71,36 @@ Codex windows are labelled by the duration returned by the account, rather
 than assuming every plan has the same limits. Multiple buckets are supported.
 Missing readings show a dash. After a reset passes, the old percentage is
 hidden until a new reading arrives. The app never assumes a fresh allowance.
+When a weekly limit is used up, the shorter limits it covers show 0% too,
+in orange, with "Weekly used up" and when it resets. No low-limit alert is
+sent for a window that a used-up weekly limit already holds at 0%.
+
+Renewal dates
+-------------
+The date at the foot of each card shows when the plan renews or ends.
+For ChatGPT it is the paid-period end that ChatGPT recorded in the sign-in
+("Paid until ..." in orange once it has passed). Claude and Antigravity do
+not report it: click "Renewal date" to enter it. Clicking the date opens a
+calendar: pick the day, choose Monthly, Yearly, or Ends, and click Save.
+Escape or a click elsewhere closes it without saving.
+
+Several ChatGPT accounts
+------------------------
+The main Codex sign-in (CODEX_HOME or %USERPROFILE%\.codex) is always
+shown. Accounts signed in to Codex Subscription Router are found
+automatically. To add another sign-in, run in PowerShell:
+  $env:CODEX_HOME = "$env:USERPROFILE\.codex-second"; codex login
+then choose three-dot menu > ChatGPT accounts > Add Codex sign-in folder...
+and pick that folder. Tick or untick accounts in the same menu.
+
+Antigravity
+-----------
+When the Antigravity CLI (agy.exe or antigravity.exe on PATH, or the copy
+T3 Code installs) is found, an Antigravity card shows the Gemini 5-hour
+limit, the Gemini weekly limit and the Claude and GPT group. The widget
+runs the CLI's /usage command, which uses no model turn. It never opens a
+browser: if the CLI is signed out, the card asks you to sign in there.
+Turn the card off with Show Antigravity in the menu.
 
 Claude
 ------
@@ -84,7 +122,7 @@ These scripts use the Node.js installation already present on this PC.
 
 Local storage
 -------------
-Usage snapshots, position, a short diagnostic log, and the original Claude
+Usage snapshots, settings, a short diagnostic log, and the original Claude
 status-line configuration are stored in:
   %LOCALAPPDATA%\AIUsageWidget
 A complete backup of Claude settings from before setup is stored there too.
@@ -106,17 +144,15 @@ configuration backups can be removed separately if no longer wanted.
 
 Source and validation
 ---------------------
-The source is in the repository's src/UsageWidget folder.
-Run the following from the repository root:
+The source is in the repository's src/UsageWidget folder; docs/WINDOWS.md
+is the full guide. Run the following from the repository root:
 Build: dotnet build src/UsageWidget/UsageWidget.csproj -c Release
 Publish: dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -o app
-Tests: node --test tests/bridge.test.cjs tests/setup.test.cjs
+Tests: dotnet run --project tests/LogicTests/LogicTests.csproj -c Release
        dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
-
-Validated: live Codex account refresh; window-duration labels; multiple
-quota buckets; zero and missing usage; expired resets; atomic Claude cache
-writes; repeatable setup and restoration; preservation of other Claude
-settings; visible layout; settings menu; desktop and always-on-top modes.
+       node --test tests/bridge.test.cjs tests/setup.test.cjs
+Live check: AIUsageWidget.exe --check  (writes check-result.json)
+Screenshots: AIUsageWidget.exe --render-demo <folder>  (sample data only)
 
 Documented data interfaces
 --------------------------
