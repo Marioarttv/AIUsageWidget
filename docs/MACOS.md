@@ -2,7 +2,9 @@
 
 ## Install and run
 
-Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. Antigravity is optional (see [Antigravity](#antigravity)). The build targets the current Mac's architecture.
+The quickest way is the ready-made app from the [latest release](https://github.com/Marioarttv/AIUsageWidget/releases/latest): see [Install on macOS](../README.md#install-on-macos). It is a universal build (Apple silicon and Intel), signed ad hoc rather than notarized, so macOS asks once before opening it.
+
+To build it yourself: requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscription, and Claude Code signed in with a Claude subscription. Antigravity is optional (see [Antigravity](#antigravity)). The build targets the current Mac's architecture.
 
 ```sh
 ./macOS/scripts/install.sh
@@ -10,7 +12,7 @@ Requires macOS 13+, Xcode to build, Codex CLI signed in with a ChatGPT subscript
 
 The installer puts the app in `~/Applications/AI Usage Widget.app` and opens it. Quit the app before reinstalling. The app is a menu-bar utility and does not add a Dock icon. Reopening it from Finder opens its menu-bar view. Only one instance runs at a time.
 
-The build uses an existing Apple Development signing identity when available, without creating certificates or downloading profiles. Override it with `AI_WIDGET_SIGNING_IDENTITY`; use `-` for ad-hoc local signing. A stable signing identity is recommended to retain Keychain access across rebuilds. This local build is not notarized for public distribution.
+`AI_WIDGET_UNIVERSAL=1 ./macOS/scripts/build-app.sh` builds for both architectures, as the release workflow does. The build uses an existing Apple Development signing identity when available, without creating certificates or downloading profiles. Override it with `AI_WIDGET_SIGNING_IDENTITY`; use `-` for ad-hoc local signing. A stable signing identity is recommended to retain Keychain access across rebuilds. This local build is not notarized for public distribution.
 
 ## Display and controls
 
@@ -65,7 +67,7 @@ Detection happens at the next successful refresh while the Mac is awake: at the 
 
 - **Codex:** invokes the installed native CLI's documented `account/rateLimits/read` over stdio, after the initialization handshake, once per tracked ChatGPT account. The CLI owns sign-in and authentication. No model requests, conversation reads, reset-credit redemption, or listening network port are used. The short-lived process exits after the reading, with a bounded timeout. Homebrew/npm and common native CLI locations are supported. A CLI account can differ from the account selected in the Codex desktop app.
 - **Claude:** reads the existing `Claude Code-credentials` item from the macOS Keychain through `/usr/bin/security`, the same way Claude Code reads it. Claude Code creates the item with that tool, so the read is silent and keeps working after Claude Code renews its sign-in. If that read fails, the app queries the Keychain directly without a prompt; **Connect Claude…** allows macOS to request access. The credentials-file fallback is also supported, including `CLAUDE_CONFIG_DIR`; custom-directory Keychain identities are not currently queried. The token is kept in memory only, until it nears expiry or Claude rejects it; it is never logged or written to the app's files.
-- **Claude sign-in renewal:** Claude Code's access token lasts about eight hours, and Claude Code renews it only while it runs. With **Renew Claude Sign-In Automatically** (in **⋯**, on by default), the widget renews a lapsed sign-in the way Claude Code does: it holds Claude Code's own refresh lock (`~/.claude/.oauth_refresh.lock` and `~/.claude.lock`), re-reads the Keychain item, and renews only if the token is still expired, then saves the renewed tokens back into `Claude Code-credentials` through `/usr/bin/security`. Claude Code then picks up the renewed sign-in instead of renewing it a second time; two simultaneous renewals would spend the same single-use refresh token and sign you out. Renewal applies only to the default Keychain item, never to `CLAUDE_CONFIG_DIR` or the credentials file, and `--check` never renews. If Claude refuses the renewal, the panel asks you to sign in to Claude Code again. Turn the setting off to leave renewal to Claude Code; then open Claude Code to renew an expired sign-in.
+- **Claude sign-in renewal:** Claude Code's access token lasts about eight hours, and Claude Code renews it only while it runs. With **Renew Claude Sign-In Automatically** (in **⋯**; off for new installations since 1.3.0, while installations from before keep it on), the widget renews a lapsed sign-in the way Claude Code does: it holds Claude Code's own refresh lock (`~/.claude/.oauth_refresh.lock` and `~/.claude.lock`), re-reads the Keychain item, and renews only if the token is still expired, then saves the renewed tokens back into `Claude Code-credentials` through `/usr/bin/security`. Claude Code then picks up the renewed sign-in instead of renewing it a second time; two simultaneous renewals would spend the same single-use refresh token and sign you out. Renewal applies only to the default Keychain item, never to `CLAUDE_CONFIG_DIR` or the credentials file, and `--check` never renews. If Claude refuses the renewal, the panel asks you to sign in to Claude Code again. With the setting off, renewal is left to Claude Code: open Claude Code to renew an expired sign-in. Renewing writes Claude Code's sign-in on your behalf, which Anthropic's [policy on subscription sign-ins](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) doesn't explicitly cover, so it is opt-in.
 - **Antigravity:** runs the CLI's own `/usage` command, as described under [Antigravity](#antigravity). The CLI owns sign-in and renewal; the widget never reads the token.
 - Claude's account-usage endpoint is not a public, stable API and can change. The app honors HTTP 429 and `Retry-After`, including date-form headers. It does not install or change Claude status-line configuration.
 
@@ -95,6 +97,14 @@ With the installed app running, this requests a small runtime report:
 "$HOME/Applications/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --diagnostics
 cat "$HOME/Library/Application Support/AIUsageWidget/diagnostics.json"
 ```
+
+To draw the panel and the menu-bar item with built-in sample readings (fictional accounts, no sign-ins read and nothing sent), for screenshots such as the website's:
+
+```sh
+"macOS/build/AI Usage Widget.app/Contents/MacOS/AIUsageWidget" --render-demo site/img
+```
+
+It writes `macos-panel.png`, `macos-menubar-light.png` and `macos-menubar-dark.png` at 2× and exits. It has to run from inside the built app.
 
 `diagnostics.json` includes `claudeRenewals`, the number of sign-in renewals since launch, and under `antigravity` whether the CLI was found, its path, whether T3 Code manages it, and since when its sign-in has needed renewing.
 

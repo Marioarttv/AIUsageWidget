@@ -60,7 +60,7 @@ internal static class WidgetTests
             editor.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice, new FakeSource(), 0, System.Windows.Input.Key.Escape) { RoutedEvent = UIElement.KeyDownEvent });
             Check(cancelled, "Escape must close the calendar.");
         }
-        Check(WidgetView.MiddleTrim("mario.example.longname@gmail.com", 24) == "mario.example…@gmail.com" && WidgetView.MiddleTrim("you@example.com", 24) == "you@example.com",
+        Check(WidgetView.MiddleTrim("alice.example.longname@email.org", 24) == "alice.example…@email.org" && WidgetView.MiddleTrim("you@example.com", 24) == "you@example.com",
             "Email trimming keeps the domain.");
     }
 

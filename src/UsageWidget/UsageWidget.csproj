@@ -9,7 +9,7 @@
     <RootNamespace>UsageWidget</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>../../assets/widget.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
+    <Version>1.3.0</Version>
     <!-- Footprint: no background GC or tiered recompilation, and only English resources. -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <TieredCompilation>false</TieredCompilation>
