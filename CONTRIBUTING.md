@@ -25,7 +25,7 @@ dotnet run --project tests/CoreTests/CoreTests.csproj -c Release
 node --test tests/bridge.test.cjs tests/setup.test.cjs
 ```
 
-On a Mac you can compile (not run) the Windows app with `dotnet build tests/CoreTests/CoreTests.csproj -p:EnableWindowsTargeting=true`. Continuous integration runs the tests on real macOS and Windows machines for every pull request.
+On a Mac or Linux, `dotnet run --project tests/LogicTests/LogicTests.csproj -c Release` runs the Windows app's platform-neutral logic tests, and `dotnet build tests/CoreTests/CoreTests.csproj -p:EnableWindowsTargeting=true` compiles (but can't run) the WPF app. Continuous integration runs the tests on real macOS and Windows machines for every pull request.
 
 Screenshots for the website come from the apps' demo renderers, which use made-up sample data: `AIUsageWidget --render-demo <folder>` (run the binary inside the built `.app` on macOS, or `AIUsageWidget.exe` on Windows).
 

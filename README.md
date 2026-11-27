@@ -17,7 +17,9 @@ Native apps for macOS and Windows · Free and open source (MIT)
 [![Windows](https://github.com/Marioarttv/AIUsageWidget/actions/workflows/windows.yml/badge.svg)](https://github.com/Marioarttv/AIUsageWidget/actions/workflows/windows.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<img src="site/img/macos-panel.png" alt="The widget on macOS: Claude at 72%, two ChatGPT accounts (one with its weekly limit used up) and Antigravity at 91%" width="300" />
+<img src="site/img/macos-panel.png" alt="The widget on macOS: Claude at 72%, two ChatGPT accounts (one with its weekly limit used up) and Antigravity at 91%" width="300" />&nbsp;&nbsp;&nbsp;<img src="site/img/windows-panel-dark.png" alt="The widget on Windows: Claude at 68%, two ChatGPT accounts (one with its weekly limit used up) and Antigravity at 97%" width="324" />
+
+<sub>macOS (left) and Windows (right), shown with sample data</sub>
 
 </div>
 
@@ -61,10 +63,10 @@ This builds the app, signs it with your Apple Development identity if you have o
 
 Requires 64-bit Windows 10 or 11. The download includes everything it needs; no .NET installation is required.
 
-1. Download **[AIUsageWidget-windows-x64.zip](https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip)** (or **[-arm64](https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip)** for ARM PCs such as Snapdragon laptops).
-2. Right-click the zip → **Extract All…**, and extract it to a permanent folder, for example `%LOCALAPPDATA%\Programs`. Keep the files together.
+1. Download **[AIUsageWidget-windows-x64.zip](https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-x64.zip)** (or **[-arm64](https://github.com/Marioarttv/AIUsageWidget/releases/latest/download/AIUsageWidget-windows-arm64.zip)** for ARM PCs such as Snapdragon laptops; not yet tested on real ARM hardware).
+2. Right-click the zip → **Extract All…**, and extract it to a permanent folder, for example `%LOCALAPPDATA%\Programs`. Keep the files together. The app saves its data in `%LOCALAPPDATA%\AIUsageWidget`, never beside itself.
 3. Open the **AI Usage Widget** folder and double-click **AIUsageWidget.exe**. The app isn't code-signed, so Windows SmartScreen may say “Windows protected your PC”: click **More info → Run anyway**.
-4. The widget opens on top of other windows, and a usage strip appears next to the taskbar clock. Open **⋯** to turn on **Start with Windows**, and click the pin to move the widget onto the desktop behind your windows.
+4. The widget opens on top of other windows, and a usage strip appears next to the taskbar clock. Open **⋯** to turn on **Start with Windows** or pick a light theme, and click the pin to move the widget onto the desktop behind your windows.
 
 To update, quit the widget (**⋯ → Quit**) and replace the folder with the new one.
 
@@ -111,7 +113,7 @@ Your Claude, Codex and Antigravity sign-ins are not affected.
 | | macOS | Windows |
 | --- | --- | --- |
 | Code | `macOS/` (Swift, SwiftUI, AppKit) | `src/UsageWidget/` (C#, WPF, .NET 10) |
-| Tests | `swift test --package-path macOS` | `dotnet run --project tests/CoreTests/CoreTests.csproj -c Release` |
+| Tests | `swift test --package-path macOS` | `dotnet run --project tests/CoreTests/CoreTests.csproj -c Release` (logic only, any OS: `tests/LogicTests`) |
 | Guide | [docs/MACOS.md](docs/MACOS.md) | [docs/WINDOWS.md](docs/WINDOWS.md) |
 
 Releases are built by GitHub Actions when a `v*` tag is pushed (see `.github/workflows/release.yml`). Contributions are welcome: please read [CONTRIBUTING.md](CONTRIBUTING.md), and report security issues as described in [SECURITY.md](SECURITY.md).
