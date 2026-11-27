@@ -14,7 +14,7 @@ internal static class TrayTests
     {
         Exception? failure = null;
         var thread = new Thread(() => {
-            try { CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); CheckStripPopupOrder(); CheckTaskbarLayoutWatch(); }
+            try { WidgetTests.Run(); CheckArtwork(preview); CheckTrayLifecycle(); CheckPlacement(); CheckStrip(preview); CheckStripPopupOrder(); CheckTaskbarLayoutWatch(); }
             catch (Exception ex) { failure = ex; }
         });
         thread.SetApartmentState(ApartmentState.STA);
@@ -103,6 +103,10 @@ internal static class TrayTests
         var state = new TaskbarState(new IntPtr(1), new(0, 1032, 1920, 48), new(0, 0, 1920, 1080), new Rect(1620, 1032, 300, 48), 1, true, false);
         var rect = TaskbarPlacement.Calculate(state, [new Rect(600, 1032, 650, 48)]);
         if (rect != new Rect(1464, 1041, 150, 30)) throw new Exception("The strip must be centered immediately left of the tray.");
+        if (TaskbarPlacement.Calculate(state, [new Rect(600, 1032, 650, 48)], TaskbarPlacement.WideWidth) != new Rect(1400, 1041, 214, 30))
+            throw new Exception("With Antigravity shown, the wider strip must still end just left of the tray.");
+        if (TaskbarPlacement.Calculate(state, [new Rect(1350, 1032, 180, 48)], TaskbarPlacement.WideWidth) is not Rect wideSafe || wideSafe.Bottom >= state.Bounds.Top || wideSafe.Width != 214)
+            throw new Exception("A crowded taskbar must place the wide strip above it.");
         var collision = TaskbarPlacement.Calculate(state, [new Rect(1400, 1032, 180, 48)]);
         if (collision is not Rect safe || safe.Bottom >= state.Bounds.Top) throw new Exception("A crowded taskbar must place the strip above it.");
         if (TaskbarPlacement.Calculate(state, null) != collision) throw new Exception("Unknown button geometry must use the safe adjacent position.");
@@ -130,13 +134,24 @@ internal static class TrayTests
         strip.Content = null; // A hidden parent Window suppresses WPF drawing; render the actual content independently.
         content.Measure(new Size(150, 30)); content.Arrange(new Rect(0, 0, 150, 30)); content.UpdateLayout();
         var row = (System.Windows.Controls.StackPanel)content.Child;
-        var providerButtons = row.Children.Cast<System.Windows.Controls.Button>().ToArray();
+        var providerButtons = row.Children.Cast<System.Windows.Controls.Button>().Where(b => b.Visibility == Visibility.Visible).ToArray();
         if (providerButtons.Length != 2 || row.DesiredSize.Width > 144 || row.DesiredSize.Width < 100) throw new Exception("Both provider pairs must fit inside the strip, including 100%.");
         if (!System.Windows.Automation.AutomationProperties.GetName(providerButtons[0]).Contains("100% remaining") ||
             !System.Windows.Automation.AutomationProperties.GetName(providerButtons[1]).Contains("0% remaining"))
             throw new Exception("The strip must expose both provider readings to accessibility tools.");
         foreach (var button in providerButtons) button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         if (clicked != 2) throw new Exception("Either provider must reveal the widget.");
+        var now3 = DateTimeOffset.UtcNow;
+        var full = new UsageSnapshot(now3, "test", [new("session", "5-hour session", 0, now3.AddHours(1).ToUnixTimeSeconds(), 300)]);
+        strip.Update(TrayReading.Create(UsageProvider.Claude, full, now3), TrayReading.Merge(UsageProvider.Codex, [("a@example.com", full), ("b@example.com", full)], now3),
+            TrayReading.Create(UsageProvider.Antigravity, full, now3));
+        content.Measure(new Size(TaskbarPlacement.WideWidth, 30)); content.Arrange(new Rect(0, 0, TaskbarPlacement.WideWidth, 30)); content.UpdateLayout();
+        if (providerButtons[0].Parent is not System.Windows.Controls.StackPanel || row.Children.Count != 3 || row.Children[2].Visibility != Visibility.Visible
+            || row.DesiredSize.Width > TaskbarPlacement.WideWidth - 6 || !System.Windows.Automation.AutomationProperties.GetName((System.Windows.Controls.Button)row.Children[2]).Contains("Antigravity"))
+            throw new Exception($"All three providers at 100% must fit inside the wide strip ({row.DesiredSize.Width:0} px).");
+        strip.Update(TrayReading.Create(UsageProvider.Claude, null, now3), TrayReading.Create(UsageProvider.Codex, null, now3), null);
+        content.Measure(new Size(150, 30)); content.UpdateLayout();
+        if (row.Children[2].Visibility != Visibility.Collapsed) throw new Exception("Without Antigravity the Gemini mark must be hidden.");
         if (preview)
         {
             var visual = new DrawingVisual();

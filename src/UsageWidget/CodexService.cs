@@ -5,9 +5,13 @@ using System.Text.Json;
 
 namespace UsageWidget;
 
-public sealed class CodexService
+// Reads one ChatGPT sign-in's limits through the Codex CLI. Additional sign-ins, such as Codex Subscription Router accounts,
+// keep their own Codex home, passed to the CLI as CODEX_HOME.
+public sealed class CodexService(string? home = null, string snapshotName = "codex.json", string signIn = "Sign in to Codex CLI to connect")
 {
     private readonly SemaphoreSlim refreshLock = new(1, 1);
+    public string? Home => home;
+    public string SnapshotName => snapshotName;
     public string? Status { get; private set; }
     public bool Refreshing { get; private set; }
 
@@ -20,12 +24,14 @@ public sealed class CodexService
         {
             string? executable = FindCodex();
             if (executable is null) { Status = "Codex CLI not found"; return; }
+            if (home is not null && !Directory.Exists(home)) { Status = signIn; return; }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
             process = new Process { StartInfo = new ProcessStartInfo(executable, "app-server --listen stdio://") {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
                 WorkingDirectory = DataStore.DirectoryPath
             } };
+            if (home is not null) process.StartInfo.Environment["CODEX_HOME"] = home;
             process.Start();
             // Drain stderr without recording account data, credentials, or session contents.
             var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
@@ -36,11 +42,11 @@ public sealed class CodexService
             var result = await ReadResponse(process, 2, timeout.Token);
             var snapshot = Parse(result, DateTimeOffset.UtcNow);
             if (snapshot.Windows.Count == 0) { Status = "No subscription windows returned"; return; }
-            DataStore.Write("codex.json", snapshot);
+            DataStore.Write(snapshotName, snapshot);
             Status = null;
         }
         catch (OperationCanceledException) { Status = "Refresh timed out · retrying automatically"; }
-        catch (Exception ex) { Status = ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ? "Sign in to Codex CLI to connect" : "Refresh failed · showing last reading"; DataStore.Log("Codex refresh: " + ex.GetType().Name); }
+        catch (Exception ex) { Status = ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ? signIn : "Refresh failed · showing last reading"; DataStore.Log("Codex refresh: " + ex.GetType().Name); }
         finally
         {
             if (process is not null) {
@@ -86,7 +92,8 @@ public sealed class CodexService
                 long? reset = w.TryGetProperty("resetsAt", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetInt64(out long at) && at is > 0 and < 253402300800 ? at : null;
                 string label = UsageFormatting.WindowLabel(minutes, key == "primary" ? "Current window" : "Additional window");
                 if (multiple) label = name + " · " + label;
-                windows.Add(new UsageWindow(id + ":" + key, label, Math.Clamp(percentage, 0, 100), reset, minutes));
+                // Each limit bucket is its own quota when there are several.
+                windows.Add(new UsageWindow(id + ":" + key, label, Math.Clamp(percentage, 0, 100), reset, minutes, multiple ? id : null));
             }
         }
         if (result.TryGetProperty("rateLimitsByLimitId", out var buckets) && buckets.ValueKind == JsonValueKind.Object && buckets.EnumerateObject().Any()) {

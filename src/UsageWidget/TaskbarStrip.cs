@@ -13,9 +13,10 @@ namespace UsageWidget;
 internal sealed class TaskbarStrip : Window, IDisposable
 {
     private readonly Border surface;
-    private readonly Button claudeButton, codexButton;
-    private readonly TextBlock claudeNumber, codexNumber;
-    private readonly Path claudeMark, codexMark;
+    private readonly Button claudeButton, codexButton, geminiButton;
+    private readonly TextBlock claudeNumber, codexNumber, geminiNumber;
+    private readonly Path claudeMark, codexMark, geminiMark;
+    private double stripWidth = TaskbarPlacement.NarrowWidth;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly Func<ContextMenu> buildMenu;
     private readonly Action reveal;
@@ -44,7 +45,9 @@ internal sealed class TaskbarStrip : Window, IDisposable
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         (claudeButton, claudeMark, claudeNumber) = ProviderButton(UsageProvider.Claude);
         (codexButton, codexMark, codexNumber) = ProviderButton(UsageProvider.Codex);
-        row.Children.Add(claudeButton); row.Children.Add(codexButton);
+        (geminiButton, geminiMark, geminiNumber) = ProviderButton(UsageProvider.Antigravity);
+        geminiButton.Visibility = Visibility.Collapsed;
+        row.Children.Add(claudeButton); row.Children.Add(codexButton); row.Children.Add(geminiButton);
         surface = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(3, 0, 3, 0), Child = row };
         Content = surface;
         PreviewMouseRightButtonUp += (_, e) => { OpenMenu(); e.Handled = true; };
@@ -62,7 +65,7 @@ internal sealed class TaskbarStrip : Window, IDisposable
         var number = new TextBlock { Text = "—", FontSize = 13, FontWeight = FontWeights.SemiBold, MinWidth = 33, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0) };
         var row = new StackPanel { Orientation = Orientation.Horizontal }; row.Children.Add(mark); row.Children.Add(number);
         var button = new Button { Content = row, Padding = new Thickness(5, 0, 5, 0), Height = 30, Cursor = Cursors.Hand, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
-        AutomationProperties.SetName(button, provider == UsageProvider.Claude ? "Claude usage" : "ChatGPT / Codex usage");
+        AutomationProperties.SetName(button, TrayReading.Name(provider) + " usage");
         button.Click += (_, _) => reveal();
         ToolTipService.SetInitialShowDelay(button, 350);
         return (button, mark, number);
@@ -76,10 +79,18 @@ internal sealed class TaskbarStrip : Window, IDisposable
         else { timer.Stop(); layoutWatch.Attach(IntPtr.Zero); Hide(); }
     }
 
-    internal void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now)
+    internal void Update(UsageSnapshot? claude, UsageSnapshot? codex, DateTimeOffset now) =>
+        Update(TrayReading.Create(UsageProvider.Claude, claude, now), TrayReading.Create(UsageProvider.Codex, codex, now), null);
+
+    // antigravity: null hides the Gemini mark, and the strip keeps its two-provider width.
+    internal void Update(TrayReading claude, TrayReading codex, TrayReading? antigravity)
     {
-        UpdateProvider(claudeButton, claudeNumber, TrayReading.Create(UsageProvider.Claude, claude, now));
-        UpdateProvider(codexButton, codexNumber, TrayReading.Create(UsageProvider.Codex, codex, now));
+        UpdateProvider(claudeButton, claudeNumber, claude);
+        UpdateProvider(codexButton, codexNumber, codex);
+        if (antigravity is not null) UpdateProvider(geminiButton, geminiNumber, antigravity);
+        geminiButton.Visibility = antigravity is null ? Visibility.Collapsed : Visibility.Visible;
+        double width = antigravity is null ? TaskbarPlacement.NarrowWidth : TaskbarPlacement.WideWidth;
+        if (width != stripWidth) { stripWidth = width; Width = width; lastPlacement = null; if (enabled) Reposition(); }
     }
 
     private static void UpdateProvider(Button button, TextBlock number, TrayReading reading)
@@ -102,8 +113,10 @@ internal sealed class TaskbarStrip : Window, IDisposable
         surface.Background = current.HighContrast ? SystemColors.WindowBrush : new SolidColorBrush(current.Light ? Color.FromRgb(229, 229, 235) : Color.FromRgb(48, 48, 55));
         var claude = current.HighContrast ? SystemColors.WindowTextBrush : new SolidColorBrush(current.Light ? Color.FromRgb(155, 72, 37) : Color.FromRgb(232, 162, 128));
         var codex = current.HighContrast ? SystemColors.WindowTextBrush : new SolidColorBrush(current.Light ? Color.FromRgb(23, 101, 74) : Color.FromRgb(155, 220, 191));
+        var gemini = current.HighContrast ? SystemColors.WindowTextBrush : new SolidColorBrush(current.Light ? Color.FromRgb(52, 88, 196) : Color.FromRgb(160, 184, 246));
         claudeMark.Fill = claude; claudeNumber.Foreground = claude;
         codexMark.Fill = codex; codexNumber.Foreground = codex;
+        geminiMark.Fill = gemini; geminiNumber.Foreground = gemini;
     }
 
     private void Reposition()
@@ -115,7 +128,7 @@ internal sealed class TaskbarStrip : Window, IDisposable
         if (lastState?.Handle != state.Handle || lastState.Bounds != state.Bounds || lastState.Tray != state.Tray)
         { buttons = null; buttonsReadAt = DateTimeOffset.MinValue; }
         lastState = state;
-        var placement = TaskbarPlacement.Calculate(state, buttons);
+        var placement = TaskbarPlacement.Calculate(state, buttons, stripWidth);
         if (placement is null) { lastPlacement = null; Hide(); return; }
         var buttonAge = DateTimeOffset.UtcNow - buttonsReadAt;
         // Debounce layout bursts to one query/second, with a slow fallback for missing shell events.

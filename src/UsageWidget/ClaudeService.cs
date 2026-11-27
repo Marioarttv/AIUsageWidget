@@ -84,7 +84,8 @@ public sealed class ClaudeService
         {
             if (used is not double percentage || !double.IsFinite(percentage) || windows.Any(w => w.Key == key || w.Label == label)) return;
             long? resetsAt = reset.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(reset.GetString(), out var at) ? at.ToUnixTimeSeconds() : null;
-            windows.Add(new UsageWindow(key, label, Math.Clamp(percentage, 0, 100), resetsAt, minutes));
+            // The session and the overall weekly limit cover the account; a model's weekly limit covers that model.
+            windows.Add(new UsageWindow(key, label, Math.Clamp(percentage, 0, 100), resetsAt, minutes, key is "five_hour" or "seven_day" ? null : key));
         }
         static double? Number(JsonElement value, string name) => value.TryGetProperty(name, out var n) && n.ValueKind == JsonValueKind.Number && n.TryGetDouble(out double d) ? d : null;
         static JsonElement Property(JsonElement value, string name) => value.TryGetProperty(name, out var p) ? p : default;

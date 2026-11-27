@@ -111,10 +111,11 @@ internal static class ResetAlertTests
         foreach (var provider in Enum.GetValues<UsageProvider>()) Observe(simultaneous, all, provider: provider);
         var rolled = all with { UpdatedAt = Now.AddSeconds(10), Windows = all.Windows.Select(w => w with { UsedPercent = 0, ResetsAt = Now.AddDays(7).ToUnixTimeSeconds() }).ToList() };
         foreach (var provider in Enum.GetValues<UsageProvider>()) Observe(simultaneous, rolled, provider: provider);
-        Check(simultaneous.Pending.Count == 4, "Each provider and window must retain its own simultaneous reset notification.");
+        int expected = Enum.GetValues<UsageProvider>().Length * 2;
+        Check(simultaneous.Pending.Count == expected, "Each provider and window must retain its own simultaneous reset notification.");
         simultaneous.MarkDelivered(simultaneous.Pending[0]);
-        Check(simultaneous.Pending.Count == 3, "Sending one notification must leave the others pending.");
+        Check(simultaneous.Pending.Count == expected - 1, "Sending one notification must leave the others pending.");
         simultaneous = RoundTrip(simultaneous);
-        Check(simultaneous.Pending.Count == 3, "Remaining notifications must survive restart during delivery.");
+        Check(simultaneous.Pending.Count == expected - 1, "Remaining notifications must survive restart during delivery.");
     }
 }
