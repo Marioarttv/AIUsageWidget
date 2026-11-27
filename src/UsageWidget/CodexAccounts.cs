@@ -30,7 +30,7 @@ public enum CodexOrigin
 }
 
 // A ChatGPT sign-in that Codex can read subscription limits for.
-// Key: null for the main sign-in, otherwise the ChatGPT account ID (or the folder path when it is unknown).
+// Key: null for the main sign-in, otherwise the ChatGPT account (workspace) ID with the email, or the folder path when unknown.
 public sealed record CodexAccount(string? Key, string? Home, string? Email, string? Plan, string? AccountId, CodexOrigin Origin, DateTimeOffset? PaidUntil = null)
 {
     public UsageSource Source => new(UsageProvider.Codex, Key);
@@ -134,8 +134,8 @@ public static class CodexAccounts
             var found = ReadIdentity(home);
             // Router slots without a sign-in are placeholders; an added folder stays listed so it can be removed.
             if (found is null && origin != CodexOrigin.Folder) return;
-            if (found?.AccountId is string id && accounts.Any(a => a.AccountId == id)) return;
-            accounts.Add(new(found?.AccountId ?? home, home, found?.Email, found?.Plan, found?.AccountId, origin, found?.PaidUntil));
+            if (found is not null && accounts.Any(a => SameAccount(a, found))) return;
+            accounts.Add(new(found is null ? home : Key(found) ?? home, home, found?.Email, found?.Plan, found?.AccountId, origin, found?.PaidUntil));
         }
         foreach (var folder in folders) Add(folder, CodexOrigin.Folder);
         try
@@ -146,6 +146,11 @@ public static class CodexAccounts
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return accounts;
     }
+
+    // ChatGPT Team members share their workspace's account ID, so the email tells them apart.
+    public static bool SameAccount(CodexAccount account, Identity identity) =>
+        identity.AccountId is not null && account.AccountId == identity.AccountId && string.Equals(account.Email, identity.Email, StringComparison.OrdinalIgnoreCase);
+    public static string? Key(Identity identity) => identity.AccountId is null ? null : identity.Email is null ? identity.AccountId : identity.AccountId + "/" + identity.Email.ToLowerInvariant();
 
     // Accounts to read, given the user's explicit choices; the main sign-in is always tracked.
     public static List<CodexAccount> Tracked(IEnumerable<CodexAccount> accounts, ICollection<string> on, ICollection<string> off) =>

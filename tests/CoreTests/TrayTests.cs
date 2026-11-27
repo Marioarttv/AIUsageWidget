@@ -105,6 +105,8 @@ internal static class TrayTests
         if (rect != new Rect(1464, 1041, 150, 30)) throw new Exception("The strip must be centered immediately left of the tray.");
         if (TaskbarPlacement.Calculate(state, [new Rect(600, 1032, 650, 48)], TaskbarPlacement.WideWidth) != new Rect(1400, 1041, 214, 30))
             throw new Exception("With Antigravity shown, the wider strip must still end just left of the tray.");
+        if (TaskbarPlacement.Calculate(state, [new Rect(1350, 1032, 180, 48)], TaskbarPlacement.WideWidth) is not Rect wideSafe || wideSafe.Bottom >= state.Bounds.Top || wideSafe.Width != 214)
+            throw new Exception("A crowded taskbar must place the wide strip above it.");
         var collision = TaskbarPlacement.Calculate(state, [new Rect(1400, 1032, 180, 48)]);
         if (collision is not Rect safe || safe.Bottom >= state.Bounds.Top) throw new Exception("A crowded taskbar must place the strip above it.");
         if (TaskbarPlacement.Calculate(state, null) != collision) throw new Exception("Unknown button geometry must use the safe adjacent position.");

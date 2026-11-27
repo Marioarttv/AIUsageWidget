@@ -6,7 +6,7 @@ A small desktop widget and taskbar strip that shows how much of your Claude, Cha
 
 Requirements:
 
-- Windows 10 or 11, x64 or ARM64.
+- Windows 10 or 11 on x64. ARM64 builds (`win-arm64`) are expected to work but haven't been tested.
 - For ChatGPT readings: the Codex CLI, installed and signed in with a ChatGPT subscription.
 - For Claude readings: Claude Code, signed in with a Claude Pro or Max subscription.
 - Optional: the Antigravity CLI, signed in with a Google AI plan (see [Antigravity](#antigravity)).
@@ -59,7 +59,7 @@ The widget shows one Codex card per tracked ChatGPT account, labelled with the a
 
 Use the checkmarks in **⋯ → ChatGPT accounts** to show or hide each account. New router sign-ins are picked up at the next refresh.
 
-Each account is read by starting the Codex CLI with `CODEX_HOME` set to that account's folder, exactly as for the main sign-in. The CLIs run one at a time, so several accounts never start several Codex processes at once. To list accounts, the widget reads only the email, plan, account ID and paid-period end from each `auth.json`. It never stores or logs tokens. The CLI may renew an account's sign-in while reading it, as usual.
+Each account is read by starting the Codex CLI with `CODEX_HOME` set to that account's folder, exactly as for the main sign-in. The CLIs run one at a time, so several accounts never start several Codex processes at once. To list accounts, the widget uses only the email, plan, account ID and paid-period end from each `auth.json`. It never stores or logs tokens. Account IDs, emails and added folder paths are kept in its settings and alert history. ChatGPT Team members share their workspace's account ID, so an account is identified by its ID and email together. The CLI may renew an account's sign-in while reading it, as usual.
 
 ## Antigravity
 
@@ -67,7 +67,7 @@ The widget shows an Antigravity card, and the strip a Gemini mark, once the Anti
 
 - **Where the CLI is found:** `antigravity.exe` or `agy.exe` on PATH or in `%USERPROFILE%\.local\bin`. After those comes the copy T3 Code installs for its Antigravity sessions: `%USERPROFILE%\.t3\tools\antigravity-acp\win32-x64` (or `win32-arm64`), the release named in `active.json`, once its install has finished. Only a native Windows executable qualifies. The Antigravity editor's `Antigravity.exe` and launcher scripts don't.
 - **How it is read:** at each refresh the widget runs `agy -p /usage --output-format json` once. The command runs no model turn. The CLI runs in an empty private folder (`%LOCALAPPDATA%\AIUsageWidget\antigravity-workspace`), with no update check and no log file, and is stopped after 35 seconds at most. The CLI owns the Google sign-in and renews it as needed. The widget never reads that sign-in, and doesn't check where it is stored.
-- **No browser from a background refresh:** signed out, the CLI would open a browser to sign in. The widget starts it with a minimal environment whose PATH is an empty folder, so it can't find `rundll32` to open one. It also runs inside a Windows job object that allows no other process and ends the CLI when the widget is done with it. The widget stops the CLI as soon as it asks for a login. The card then says *Sign-in expired · Open Antigravity in T3 Code* (or *Run agy in a terminal*). Signing in there fixes it. The widget doesn't start the CLI again for half an hour, unless you press ↻.
+- **No browser from a background refresh:** signed out, the CLI would open a browser to sign in. The widget is designed to prevent that in three ways. It starts the CLI with a minimal environment whose PATH is an empty folder, so the CLI can't find `rundll32` to open a browser. Right after start, the CLI goes into a Windows job object that allows it no other process and ends it when the widget is done with it. And the widget stops the CLI as soon as it asks for a login. This was tested with Antigravity CLI 1.5.18, signed out: the prompt was recognised in under a second, and no other process ran. The card then says *Sign-in expired · Open Antigravity in T3 Code* (or *Run agy in a terminal*). Signing in there fixes it. The widget doesn't start the CLI again for half an hour, unless you press ↻.
 - Behind a proxy, set `HTTPS_PROXY` (and `NO_PROXY`) for your user, since the CLI doesn't read the Windows proxy settings. The widget passes these on.
 
 ## Notifications
@@ -127,7 +127,7 @@ node --test tests/bridge.test.cjs tests/setup.test.cjs
   Get-Content "$env:LOCALAPPDATA/AIUsageWidget/check-result.json"
   ```
 
-The `Windows` GitHub Actions workflow runs all of this on `windows-latest` for every pull request. It builds the self-contained release layout and renders the screenshots from it (artifact `windows-screenshots`). It also runs the real Antigravity CLI, signed out, through the widget's reader, to confirm that the CLI stops at the login prompt and starts no browser.
+The `Windows` GitHub Actions workflow runs the tests on `windows-latest` for every pull request and push to `main`. It also builds the self-contained `win-x64` release layout, renders the screenshots from it (artifact `windows-screenshots`), and runs `--check` on a runner without sign-ins, which covers only the failure path. A separate, advisory job (it can't fail the build) downloads the current Antigravity CLI and runs it, signed out, through the widget's reader. It checks that the reader stops the CLI at the login prompt and that no other process starts.
 
 ## Remove
 

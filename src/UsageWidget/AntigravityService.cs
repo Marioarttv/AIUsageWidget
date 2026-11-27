@@ -39,7 +39,10 @@ public sealed class AntigravityService
             if (cli is null) { Status = "Install the Antigravity CLI to connect"; return; }
             string how = cli.ManagedByT3 ? "Open Antigravity in T3 Code" : "Run " + Path.GetFileNameWithoutExtension(cli.Path) + " in a terminal";
             if (lapsedSince is not null) { Status = "Sign-in expired · " + how; return; }
-            var outcome = await Task.Run(() => Read(cli.Path, Workspace, EmptyPath, TimeSpan.FromSeconds(35)));
+            int processes = -1;
+            var outcome = await Task.Run(() => Read(cli.Path, Workspace, EmptyPath, TimeSpan.FromSeconds(35), total => processes = total));
+            // No account data: only how the reading ended, to make a failing read diagnosable from widget.log.
+            if (outcome.Kind != AntigravityResult.Reading) DataStore.Log($"Antigravity read: {outcome.Kind} ({outcome.Message ?? "-"}), job processes={processes}");
             switch (outcome.Kind)
             {
                 case AntigravityResult.Reading:
@@ -53,7 +56,7 @@ public sealed class AntigravityService
                 default: Status = outcome.Message; break;
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception ex)
         {
             Status = "Antigravity refresh failed · showing last reading";
             DataStore.Log("Antigravity refresh: " + ex.GetType().Name);
@@ -99,7 +102,7 @@ public sealed class AntigravityService
                 lock (stderr) if (AntigravityCli.AsksForLogin(stderr.ToString())) return new(AntigravityResult.SignIn);
                 lock (stdout) lock (stderr) if (stdout.Length + stderr.Length > 2_000_000) return new(AntigravityResult.Failure, Message: "Antigravity returned an invalid response");
                 if (DateTime.UtcNow > until) return new(AntigravityResult.Failure, Message: "Refresh timed out · retrying automatically");
-                Task.WaitAny([outDone, errDone], 200);
+                Task.WaitAny([Task.WhenAll(outDone, errDone)], 200);
             }
             lock (stderr) if (AntigravityCli.AsksForLogin(stderr.ToString())) return new(AntigravityResult.SignIn);
             lock (stdout) return AntigravityCli.Outcome(stdout.ToString(), DateTimeOffset.UtcNow);

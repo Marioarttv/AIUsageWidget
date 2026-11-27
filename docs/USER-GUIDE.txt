@@ -98,8 +98,9 @@ Antigravity
 When the Antigravity CLI (agy.exe or antigravity.exe on PATH, or the copy
 T3 Code installs) is found, an Antigravity card shows the Gemini 5-hour
 limit, the Gemini weekly limit and the Claude and GPT group. The widget
-runs the CLI's /usage command, which uses no model turn. It never opens a
-browser: if the CLI is signed out, the card asks you to sign in there.
+runs the CLI's /usage command, which uses no model turn. It is designed
+not to let the CLI open a browser: if the CLI is signed out, the widget
+stops it and the card asks you to sign in there.
 Turn the card off with Show Antigravity in the menu.
 
 Claude

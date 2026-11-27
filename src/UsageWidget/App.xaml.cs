@@ -34,7 +34,7 @@ public partial class App : System.Windows.Application
         if (Option(e.Args, "--check-antigravity") is string cli)
         {
             _ = Task.Run(() => ProbeAntigravity(cli, e.Args.SkipWhile(a => a != "--check-antigravity").Skip(2).FirstOrDefault()))
-                .ContinueWith(task => Dispatcher.Invoke(() => Shutdown(task.Result)));
+                .ContinueWith(task => Dispatcher.Invoke(() => Shutdown(task.IsFaulted ? 1 : task.Result)));
             return;
         }
         if (RelaunchOutsidePackage()) { Shutdown(); return; }
