@@ -1,0 +1,113 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore
+        run: dotnet restore tests/CoreTests/CoreTests.csproj
+
+      - name: Publish (framework-dependent, as START-WIDGET.cmd does)
+        run: dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -o app
+
+      - name: Logic tests (plain .NET)
+        run: dotnet run --project tests/LogicTests/LogicTests.csproj -c Release
+
+      - name: Core tests (WPF, tray and taskbar)
+        run: dotnet run --project tests/CoreTests/CoreTests.csproj -c Release -- --tray-preview
+
+      - name: Claude bridge and setup tests
+        run: node --test tests/bridge.test.cjs tests/setup.test.cjs
+
+      - name: Publish self-contained (as release zips are built)
+        run: dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -r win-x64 --self-contained true -o dist/win-x64
+
+      - name: Render demo screenshots from the self-contained build
+        shell: pwsh
+        run: |
+          $shots = Join-Path $PWD 'screenshots'
+          $process = Start-Process -FilePath 'dist/win-x64/AIUsageWidget.exe' -ArgumentList '--render-demo', "`"$shots`"" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { Get-Content (Join-Path $shots 'render-error.txt') -ErrorAction SilentlyContinue; exit 1 }
+          $expected = 'widget-dark.png', 'widget-light.png', 'calendar-dark.png', 'calendar-light.png', 'strip-dark.png', 'strip-light.png'
+          foreach ($name in $expected) { if (-not (Test-Path (Join-Path $shots $name))) { Write-Error "Missing $name"; exit 1 } }
+          Copy-Item tests/CoreTests/bin/Release/net10.0-windows/*-preview.png $shots -ErrorAction SilentlyContinue
+          Get-ChildItem $shots | Format-Table Name, Length
+
+      - name: Check mode without sign-ins
+        shell: pwsh
+        run: |
+          # No Claude, Codex or Antigravity on the runner: the check must finish, write its report and fail cleanly.
+          $process = Start-Process -FilePath 'dist/win-x64/AIUsageWidget.exe' -ArgumentList '--check' -Wait -PassThru
+          $report = Get-Content "$env:LOCALAPPDATA/AIUsageWidget/check-result.json" -Raw
+          $report
+          if ($process.ExitCode -ne 1) { Write-Error "Expected exit code 1 without sign-ins, got $($process.ExitCode)"; exit 1 }
+          $json = $report | ConvertFrom-Json
+          if ($json.ok -or $null -eq $json.codexAccounts -or $null -eq $json.antigravity) { Write-Error 'Unexpected check report'; exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: screenshots/
+          if-no-files-found: warn
+
+  # The real Antigravity CLI, signed out, against the widget's reader: it must stop quickly at the login prompt, start no
+  # other process (browser) and leave the empty PATH folder empty. Separate so an upstream CLI change can't fail the build.
+  antigravity-cli:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish
+        run: dotnet publish src/UsageWidget/UsageWidget.csproj -c Release -o app
+      - name: Download the Antigravity CLI
+        shell: pwsh
+        run: |
+          $manifest = Invoke-RestMethod 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json'
+          Write-Host "Antigravity CLI $($manifest.version)"
+          if (-not $manifest.url.StartsWith('https://storage.googleapis.com/antigravity-public/antigravity-cli/')) { Write-Error 'Unexpected download URL'; exit 1 }
+          New-Item -ItemType Directory cli | Out-Null
+          Invoke-WebRequest $manifest.url -OutFile cli/agy.exe
+          $hash = (Get-FileHash cli/agy.exe -Algorithm SHA512).Hash.ToLowerInvariant()
+          if ($hash -ne $manifest.sha512) { Write-Error 'SHA-512 mismatch'; exit 1 }
+      - name: Read usage while signed out
+        shell: pwsh
+        run: |
+          $profile = Join-Path $env:RUNNER_TEMP 'agy-profile'
+          New-Item -ItemType Directory $profile, "$profile/AppData/Roaming", "$profile/AppData/Local" -Force | Out-Null
+          $env:USERPROFILE = $profile; $env:APPDATA = "$profile/AppData/Roaming"; $env:LOCALAPPDATA = "$profile/AppData/Local"
+          $result = Join-Path $env:RUNNER_TEMP 'agy-result.json'
+          $before = @(Get-Process rundll32, msedge, chrome -ErrorAction SilentlyContinue).Count
+          $process = Start-Process -FilePath 'app/AIUsageWidget.exe' -ArgumentList '--check-antigravity', "`"$PWD/cli/agy.exe`"", "`"$result`"" -Wait -PassThru
+          $after = @(Get-Process rundll32, msedge, chrome -ErrorAction SilentlyContinue).Count
+          $report = Get-Content $result -Raw
+          $report
+          $json = $report | ConvertFrom-Json
+          Write-Host "Browser-like processes before: $before, after: $after"
+          if ($process.ExitCode -ne 0) { Write-Error 'The probe failed'; exit 1 }
+          if ($json.outcome -ne 'SignIn') { Write-Error "Expected the sign-in prompt to be recognised, got $($json.outcome): $($json.message)"; exit 1 }
+          if ($json.elapsedMs -gt 30000) { Write-Error 'The signed-out CLI was not stopped quickly'; exit 1 }
+          if ($json.jobProcesses -gt 1) { Write-Error 'The CLI started another process'; exit 1 }
+          if ($json.pathEntries -ne 0) { Write-Error 'The empty PATH folder was written to'; exit 1 }
+          if ($after -gt $before) { Write-Error 'A browser or rundll32 was started'; exit 1 }
