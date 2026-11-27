@@ -64,7 +64,8 @@ final class UsageModel: ObservableObject {
     /// Whether the Antigravity CLI was found at the last check.
     @Published private(set) var antigravityInstalled = false
     /// Renews Claude Code's sign-in after it lapses, instead of waiting for Claude Code to be opened.
-    @Published var renewClaude = UserDefaults.standard.object(forKey: "renewClaude") as? Bool ?? true {
+    /// Off for new installations; installations from before 1.3.0 keep it on (see `init`).
+    @Published var renewClaude = UserDefaults.standard.object(forKey: "renewClaude") as? Bool ?? false {
         didSet { UserDefaults.standard.set(renewClaude, forKey: "renewClaude") }
     }
     /// How often to refresh while the panel or menu-bar view is on screen.
@@ -112,6 +113,12 @@ final class UsageModel: ObservableObject {
     /// `demo` shows built-in sample readings for screenshots, without reading sign-ins, the disk or the network.
     init(demo: Bool = false) {
         if demo { applyDemo(); return }
+        // Renewal used to be on by default. An existing installation (it has saved readings) keeps that choice.
+        if UserDefaults.standard.object(forKey: "renewClaude") == nil {
+            let existing = FileManager.default.fileExists(atPath: Self.dataDirectory.appendingPathComponent("usage.json").path)
+            UserDefaults.standard.set(existing, forKey: "renewClaude")
+            renewClaude = existing
+        }
         try? FileManager.default.createDirectory(at: Self.dataDirectory, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
